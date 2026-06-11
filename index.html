@@ -156,9 +156,9 @@ asyncio.<span class="tok-fn">run</span>(main())</code></pre>
       <div class="reveal">
         <span class="kicker">What the badge says</span>
         <h2 style="font-size:clamp(26px,3.4vw,40px)">Acknowledged — then refused.</h2>
-        <p>The badge accepts the command at the transport layer, then answers with RCSP status <code style="font-family:var(--mono);color:#e6c07b">0x02</code>: the “watch dial” subsystem this needs isn't wired up in the display-badge firmware, so it always shows the most-recently-uploaded file. (Curiously, <em>file-browse</em> is accepted — the filesystem is enumerable; there's just no “show this one.”)</p>
+        <p>The badge accepts the command at the transport layer, then answers with RCSP status <code style="font-family:var(--mono);color:#e6c07b">0x02</code> — which the device's own SDK names <code style="font-family:var(--mono);color:#e6c07b">STATUS_UNKNOWN_CMD</code>. It's literally telling us it doesn't recognise the command: the “watch dial” subsystem isn't wired up in this display-badge firmware, so it always shows the most-recently-uploaded file. (The legacy command channel was tested too — no response. <em>File-browse</em> is accepted, so the filesystem is enumerable; there's just no “show this one.”)</p>
         <div class="stat-row">
-          <div class="stat"><div class="n">0x02</div><div class="l">RCSP reject status</div></div>
+          <div class="stat"><div class="n">0x02</div><div class="l">= STATUS_UNKNOWN_CMD</div></div>
           <div class="stat"><div class="n">✗</div><div class="l">switch on V11.1.0.3</div></div>
           <div class="stat"><div class="n">~4s</div><div class="l">re-upload fallback</div></div>
         </div>
