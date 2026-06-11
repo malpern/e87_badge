@@ -2,10 +2,15 @@
 
 ### Flip between preloaded images without re-uploading — a single tiny command instead of a multi-second transfer.
 
-> **Status: experimental.** This capability is reverse-engineered from the
-> JieLi watch SDK bundled in the Zrun app and is **not yet confirmed against
-> shipping E87 firmware**. One `e87 probe` against your badge tells you whether
-> your unit supports it. See [Is my badge supported?](#is-my-badge-supported)
+> **Status: tested on E87 firmware `V11.1.0.3` — NOT supported on that firmware.**
+> The switch command is real (it's in the device's own SDK), and the badge
+> *acknowledges* it at the transport level — but on the firmware we measured it
+> replies with RCSP error status `0x02` and the display does **not** change. The
+> "watch dial" subsystem this relies on simply isn't wired up in this
+> display-badge firmware; the badge always shows the most-recently-uploaded file.
+> This page documents the mechanism and how to check your own unit
+> (`e87 probe`); **on V11.1.0.3 the answer is no, fall back to re-upload.** Other
+> or newer firmware may differ. See [Is my badge supported?](#is-my-badge-supported)
 
 ---
 
@@ -137,15 +142,20 @@ So we built a probe. It reads the current file, attempts a listing, and tries a
 no-op switch to whatever is already showing — then tells you what answered:
 
 ```console
-$ e87 probe --address 46:8B:00:01:83:9C
+$ e87 probe --address 46:8B:00:01:83:9C     # actual result on V11.1.0.3
 {
-  "get_using_dial": { "supported": true,  "current_path": "啜20260610153000.jpg" },
-  "file_browse":    { "supported": false, "error": "...did not answer..." },
-  "set_using_dial": { "supported": true,  "tried_path": "啜20260610153000.jpg" }
+  "get_using_dial": { "supported": false, "error": "...RCSP status 0x02..." },
+  "file_browse":    { "supported": true,  "files": [] },
+  "set_using_dial": { "supported": false, "error": "...RCSP status 0x02..." }
 }
 
-Instant switching: SUPPORTED on this badge ✅
+Instant switching: NOT confirmed on this badge ❌
 ```
+
+On the unit we measured, `file_browse` is accepted but the dial actions are
+rejected — the badge speaks the file protocol but not the "switch displayed
+file" command. A firmware that *does* implement it would instead report
+`set_using_dial: { "supported": true }`.
 
 Programmatically:
 

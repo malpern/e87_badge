@@ -9,7 +9,7 @@ Open-source Python client + Home Assistant integration for the **E-Badge E87 / L
 - 🎞️ Multi-image slideshows (MJPG AVI)
 - 🖼️ Animated GIFs
 - 🧧 Danmaku — scrolling text with custom colours
-- ⚡ **Instant asset switching** (experimental) — flip between already-uploaded files with one tiny command instead of re-uploading. See [`docs/instant-switching.md`](docs/instant-switching.md).
+- ⚡ **Instant asset switching** — the switch-by-reference command exists in the protocol, but the firmware we tested (E87 `V11.1.0.3`) rejects it; `e87 probe` checks your unit. See [`docs/instant-switching.md`](docs/instant-switching.md).
 
 Built on top of:
 
@@ -48,25 +48,26 @@ Pass `--address AA:BB:CC:DD:EE:FF` to target a specific badge (otherwise discove
 
 ---
 
-## ⚡ Instant asset switching (experimental)
+## ⚡ Instant asset switching — found, but firmware-gated
 
-The badge stores every upload as its own persistent file, so you can **preload
-several assets once and then flip between them with a single sub-second
-command** — no re-upload. Ideal for reactive displays (idle ↔ active, etc.)
-where a 30-second GIF re-send would kill the interaction.
+The device's own SDK has a "show a stored file by reference" command, which
+*would* let you preload several assets and flip between them with one tiny
+sub-second command instead of re-uploading:
 
 ```python
 async with E87Client(addr) as badge:
     idle   = await badge.send_gif("idle.gif")     # returns the device path
     active = await badge.send_gif("active.gif")
-    await badge.show_file(active)                  # instant
-    await badge.show_file(idle)                    # instant
+    await badge.show_file(active)                  # one command, no re-upload
 ```
 
-This is reverse-engineered from the JieLi SDK and **not yet confirmed on all
-firmware**; `await badge.probe_switching()` (or `e87 probe`) reports whether
-your unit supports it, and `show_file` raises `E87ProtocolError` if not so you
-can fall back to re-upload. Full guide: [`docs/instant-switching.md`](docs/instant-switching.md).
+**Reality check (measured):** on the firmware we tested — **E87 `V11.1.0.3`** —
+the badge **rejects** the switch command (RCSP status `0x02`); the dial subsystem
+isn't implemented, so the display always shows the last uploaded file.
+`show_file()` raises `E87ProtocolError` and you fall back to re-upload (~4 s).
+`await badge.probe_switching()` (or `e87 probe`) checks any given unit honestly —
+other/newer firmware may implement it. Full write-up:
+[`docs/instant-switching.md`](docs/instant-switching.md).
 
 Library API:
 

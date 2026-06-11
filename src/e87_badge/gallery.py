@@ -2,17 +2,21 @@
 
 .. warning::
 
-   **Experimental / reverse-engineered, not yet confirmed on E87 firmware.**
-   These commands were recovered from the Zrun APK's bundled JieLi watch SDK
-   (``com.jieli.jl_rcsp``). The badge *speaks* JieLi RCSP over AE01 (its
-   file-upload opcodes match the SDK's command registry), and every upload is
-   committed as its own persistent file — so the architecture supports
-   switch-by-reference. But the stock app never sends these particular opcodes
-   to the badge (it re-uploads on every selection), so whether this specific
-   firmware implements them can only be settled on hardware. Use
-   :func:`probe_switching` (or ``e87 probe``) to find out, and treat a
-   :class:`~e87_badge.errors.E87ProtocolError` from these calls as "this unit
-   doesn't support it — fall back to re-upload."
+   **Tested on E87 firmware V11.1.0.3: NOT supported.** These commands were
+   recovered from the Zrun APK's bundled JieLi watch SDK (``com.jieli.jl_rcsp``),
+   and the badge *does* speak JieLi RCSP over AE01 (its file-upload opcodes match
+   the SDK's command registry; every upload is committed as its own persistent
+   file). But on the one firmware we have measured (**V11.1.0.3**) the badge
+   **rejects the dial-action opcode** — `SET_USING_DIAL` and even `GET_USING_DIAL`
+   return RCSP status ``0x02`` — so display-by-reference does not work and these
+   calls raise :class:`~e87_badge.errors.E87ProtocolError`. The "watch dial"
+   subsystem simply isn't wired up in this display-badge firmware; the badge
+   always shows the most recently uploaded file. (File *browse*, cmd 0x0c, is
+   accepted — so the filesystem is enumerable even though switching is not.)
+
+   Kept in the library because (a) other/newer firmware may implement it, and
+   (b) :func:`probe_switching` / ``e87 probe`` is the honest way to check any
+   given unit. Always be ready to fall back to a normal re-upload.
 
 Why it matters
 --------------
@@ -110,10 +114,15 @@ async def set_using_dial(
             f"badge did not acknowledge dial switch to {path!r}; this firmware "
             "likely does not implement RCSP SET_USING_DIAL — fall back to re-upload"
         ) from exc
-    status = ack.body[1] if len(ack.body) >= 2 else 0xFF
-    if status not in (0x00, 0x01):
-        # status byte position can vary by firmware; log rather than hard-fail.
-        log.warning("SET_USING_DIAL ack carried status 0x%02x (body=%s)", status, ack.body.hex())
+    # RCSP response body is [status][opCodeSn][param...]; status 0 == success.
+    status = ack.body[0] if ack.body else 0xFF
+    if status != 0x00:
+        raise E87ProtocolError(
+            f"badge rejected the dial switch to {path!r} (RCSP status 0x{status:02x}). "
+            "This firmware does not implement display-by-reference — observed on "
+            "E87 V11.1.0.3, which returns status 0x02 for any dial action. "
+            "Re-upload the asset instead."
+        )
 
 
 async def get_using_dial(
@@ -131,11 +140,16 @@ async def get_using_dial(
         timeout=timeout,
         label="ack GET_USING_DIAL (0x1a)",
     )
-    # Response body: [status?][opCodeSn][op][flag][path...]; be liberal and pull
-    # the trailing printable run as the path.
-    body = ack.body
-    path = _extract_trailing_path(body)
-    log.info("Current displayed file: %r (raw body=%s)", path, body.hex())
+    # RCSP response body is [status][opCodeSn][param...]. status 0 == success;
+    # E87 V11.1.0.3 returns 0x02 (dial subsystem unsupported).
+    status = ack.body[0] if ack.body else 0xFF
+    if status != 0x00:
+        raise E87ProtocolError(
+            f"badge rejected GET_USING_DIAL (RCSP status 0x{status:02x}); this "
+            "firmware's dial subsystem is unsupported (E87 V11.1.0.3 returns 0x02)."
+        )
+    path = _extract_trailing_path(ack.body[2:])
+    log.info("Current displayed file: %r (raw body=%s)", path, ack.body.hex())
     return path
 
 
