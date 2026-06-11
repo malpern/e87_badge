@@ -1,5 +1,7 @@
 # e87_badge
 
+📖 **Documentation site: [malpern.github.io/e87_badge](https://malpern.github.io/e87_badge/)** — getting started, the [instant-switching guide](https://malpern.github.io/e87_badge/instant-switching), and the full [protocol reference](https://malpern.github.io/e87_badge/protocol).
+
 Open-source Python client + Home Assistant integration for the **E-Badge E87 / L8** round-screen Bluetooth pin (the one that normally pairs with the Zrun app).
 
 - 🖼️ Static images (JPEG/PNG upload)
