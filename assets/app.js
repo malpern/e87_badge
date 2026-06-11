@@ -62,6 +62,8 @@
     var pointer = null;          // last cursor position, client coords
     var lastMoveT = -1e9;        // seconds since start of last pointer move
     var gx = 0, gy = 0;          // smoothed gaze, -1..1 in each axis
+    var sacX = 0, sacY = 0;      // current idle look-at target (a held glance)
+    var nextSacT = 0;            // when to dart to the next glance
 
     window.addEventListener("pointermove", function (e) {
       pointer = { x: e.clientX, y: e.clientY };
@@ -87,34 +89,46 @@
       if (d < 0 || d > dur) return 1;
       return Math.abs(Math.cos(Math.PI * (d / dur)));
     }
+    // Idle "looking around": hold a glance, then dart to a fresh spot — the
+    // way a real eye saccades, not a continuous float.
+    function pickGlance(t) {
+      var ang = Math.random() * Math.PI * 2;
+      var r = 0.45 + Math.random() * 0.5;            // reach 0.45–0.95 of range
+      if (Math.random() < 0.22) r = Math.random() * 0.15;  // occasional glance back to centre
+      sacX = Math.cos(ang) * r;
+      sacY = Math.sin(ang) * r * 0.78;               // a little less vertical travel
+      nextSacT = t + 0.65 + Math.random() * 1.7;     // hold this glance 0.65–2.35 s
+      if (r > 0.72 && Math.random() < 0.55) manualBlinkT = t;  // big looks often blink
+    }
 
     function frame(now) {
       var t = (now - start) / 1000;
       var w = canvas.width, h = canvas.height, cx = w / 2, cy = h / 2;
       var eyeR = Math.min(w, h) * 0.46;     // socket / glow extent
-      var irisR = eyeR * 0.80;              // iris sits inside the dark socket
+      var irisR = eyeR * 0.72;              // iris sits inside the dark socket
       var travel = eyeR - irisR;            // how far the iris can move and stay in-socket
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
 
-      // Target gaze: toward the cursor, or a calm idle drift if it's been still.
-      var tx, ty;
-      var idle = (t - lastMoveT) > 2.6;
-      if (pointer && !idle) {
+      // Target gaze: lock onto the cursor, or look around with saccades.
+      var tx, ty, ease;
+      var following = pointer && (t - lastMoveT) < 1.6;
+      if (following) {
         var rect = canvas.getBoundingClientRect();
         var ecx = rect.left + rect.width / 2, ecy = rect.top + rect.height / 2;
-        var span = Math.max(rect.width, 220) * 1.9;  // distance that maps to full deflection
+        var span = Math.max(rect.width, 200) * 1.15; // smaller span = pupil tracks harder
         tx = clamp((pointer.x - ecx) / span, -1, 1);
         ty = clamp((pointer.y - ecy) / span, -1, 1);
-        var mag = Math.hypot(tx, ty), max = 1.0;
-        if (mag > max) { tx *= max / mag; ty *= max / mag; }
+        var mag = Math.hypot(tx, ty);
+        if (mag > 1) { tx /= mag; ty /= mag; }
+        ease = 0.22;                         // responsive but smooth tracking
       } else {
-        tx = Math.sin(t * 0.55) * 0.34 + Math.sin(t * 0.19) * 0.16;
-        ty = Math.cos(t * 0.47) * 0.22;
+        if (t > nextSacT) pickGlance(t);     // time for a new glance
+        tx = sacX; ty = sacY;
+        ease = 0.32;                         // a quick dart, then hold
       }
       if (reduce) { tx = 0; ty = 0; }
-      // Smooth toward the target (eyes ease, they don't snap).
-      gx += (tx - gx) * 0.14; gy += (ty - gy) * 0.14;
+      gx += (tx - gx) * ease; gy += (ty - gy) * ease;
       var ox = gx * travel, oy = gy * travel;
 
       var open = reduce ? 1 : Math.min(ambientOpen(t), manualOpen(t));
@@ -149,8 +163,8 @@
         ctx.strokeStyle = c; ctx.stroke();
       });
 
-      // pupil (a hair more travel than the iris — parallax)
-      var px = cx + ox * 1.18, py = cy + oy * 1.18;
+      // pupil (more travel than the iris — parallax makes the look pop)
+      var px = cx + ox * 1.38, py = cy + oy * 1.38;
       ctx.beginPath(); ctx.arc(px, py, irisR * 0.42, 0, Math.PI * 2);
       ctx.fillStyle = "#03060f"; ctx.fill();
 
