@@ -180,7 +180,17 @@ h2.section-title {
   transition: transform .35s var(--ease), background .35s var(--ease), border-color .35s var(--ease);
 }
 .card:hover { transform: translateY(-4px); background: var(--surface-2); border-color: var(--hairline-2); }
-.card .ico { font-size: 26px; margin-bottom: 16px; display: block; }
+.card .ico {
+  width: 46px; height: 46px; margin-bottom: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 13px;
+  background: linear-gradient(150deg, rgba(41,151,255,0.16), rgba(48,214,198,0.08));
+  border: 1px solid var(--hairline-2);
+  color: #a9d6ff;
+  transition: color .35s var(--ease), background .35s var(--ease);
+}
+.card .ico svg { width: 24px; height: 24px; display: block; }
+.card:hover .ico { color: #d6ecff; background: linear-gradient(150deg, rgba(41,151,255,0.24), rgba(48,214,198,0.12)); }
 .card h3 { margin: 0 0 8px; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
 .card p { margin: 0; font-size: 16px; color: var(--text-dim); line-height: 1.5; }
 
