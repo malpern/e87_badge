@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import re
 
-from e87_badge.protocol import _build_file_path_response, _random_temp_name
+from e87_badge.protocol import (
+    _build_file_path_response,
+    _make_device_path,
+    _random_temp_name,
+)
 
 
 def test_temp_name_has_extension_jpg():
@@ -28,8 +32,15 @@ def test_temp_names_are_distinct():
     assert len(names) > 1, "RNG produced identical names across 20 samples"
 
 
+def test_make_device_path_format():
+    path = _make_device_path("jpg")
+    # U+555C prefix + 14-digit timestamp + extension
+    assert re.fullmatch(r"\u555c\d{14}\.jpg", path), path
+    assert _make_device_path("avi").endswith(".avi")
+
+
 def test_path_response_format_jpg():
-    body = _build_file_path_response(device_seq=0x85, extension="jpg")
+    body = _build_file_path_response(device_seq=0x85, device_path=_make_device_path("jpg"))
     # Header: 00 <seq> ...
     assert body[0] == 0x00
     assert body[1] == 0x85
@@ -41,7 +52,7 @@ def test_path_response_format_jpg():
 
 
 def test_path_response_format_avi():
-    body = _build_file_path_response(device_seq=0x86, extension="avi")
+    body = _build_file_path_response(device_seq=0x86, device_path=_make_device_path("avi"))
     assert body[0] == 0x00
     assert body[1] == 0x86
     tail_utf16 = body[2:].decode("utf-16-le")
@@ -50,5 +61,5 @@ def test_path_response_format_avi():
 
 
 def test_path_response_device_seq_wraps():
-    body = _build_file_path_response(device_seq=0x1FF, extension="jpg")
+    body = _build_file_path_response(device_seq=0x1FF, device_path=_make_device_path("jpg"))
     assert body[1] == 0xFF

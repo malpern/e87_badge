@@ -47,13 +47,21 @@ class UploadSession:
         self._bus = bus
         self._seq = 0x00
         self._file_complete_handled = False
+        self.committed_path: str | None = None
+        """Device-side path this upload was stored under (set once cmd 0x20 is
+        handled). This is the handle you pass to a later dial-switch to redisplay
+        the asset without re-uploading — see :mod:`e87_badge.gallery`."""
 
-    async def run(self, data: bytes, *, extension: str = EXTENSION_STATIC) -> None:
+    async def run(self, data: bytes, *, extension: str = EXTENSION_STATIC) -> str | None:
         """Upload `data` (already fully encoded — JPEG bytes for static, AVI
-        bytes for animated) with the filename extension `.ext`."""
+        bytes for animated) with the filename extension `.ext`.
+
+        Returns the device-side path the badge stored the file under (or None
+        if the device never sent a FILE_COMPLETE we could answer)."""
         log.info("Upload: payload is %d bytes, extension=.%s", len(data), extension)
         self._seq = 0x00
         self._file_complete_handled = False
+        self.committed_path = None
 
         await self._phase1_reset_auth()
         await self._phase2_fd02_control()
@@ -64,6 +72,7 @@ class UploadSession:
         await self._phase7_transfer_params()
         chunk_size = await self._phase8_file_metadata(data, extension)
         await self._phase9_transfer(data, chunk_size, extension)
+        return self.committed_path
 
     # ── Phase helpers ──────────────────────────────────────────────────────
 
@@ -311,12 +320,13 @@ class UploadSession:
                 device_seq_20 = frame.body[0] if frame.body else (state.data_seq & 0xFF)
                 log.info("RX cmd 0x20 (FILE_COMPLETE) seq=%d", device_seq_20)
                 if not self._file_complete_handled:
+                    self.committed_path = _make_device_path(extension)
                     await self._send_fe(
                         FLAG_RESPONSE, 0x20,
-                        _build_file_path_response(device_seq_20, extension),
+                        _build_file_path_response(device_seq_20, self.committed_path),
                     )
                     self._file_complete_handled = True
-                    log.info("Sent path response")
+                    log.info("Sent path response; stored as %s", self.committed_path)
                 close_frame = await wait_for_frame(
                     self._bus, lambda f: f.cmd == 0x1C, timeout=30.0,
                     label="session close (cmd 0x1c)",
@@ -433,12 +443,17 @@ def _random_temp_name(extension: str) -> str:
     return f"{random.randint(0, 0xFFFFFF):06x}.{extension}"
 
 
-def _build_file_path_response(device_seq: int, extension: str) -> bytes:
-    """Body of the cmd 0x20 reply. Upstream uses a fixed prefix character
-    U+555C plus YYYYMMDDHHMMSS plus the file extension; the device stores
-    this verbatim as the gallery filename."""
+def _make_device_path(extension: str) -> str:
+    """The gallery filename the badge stores this upload under. Upstream uses a
+    fixed prefix character U+555C plus YYYYMMDDHHMMSS plus the file extension;
+    the device persists this verbatim, and it is the handle a later dial-switch
+    redisplays (see :mod:`e87_badge.gallery`)."""
     now = dt.datetime.now()
     date_str = now.strftime("%Y%m%d%H%M%S")
-    device_path = "\u555c" + date_str + "." + extension
+    return "\u555c" + date_str + "." + extension
+
+
+def _build_file_path_response(device_seq: int, device_path: str) -> bytes:
+    """Body of the cmd 0x20 reply: ack header + the stored path in UTF-16LE."""
     path_utf16 = device_path.encode("utf-16-le") + b"\x00\x00"
     return bytes((0x00, device_seq & 0xFF)) + path_utf16

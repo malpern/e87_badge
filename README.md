@@ -7,6 +7,7 @@ Open-source Python client + Home Assistant integration for the **E-Badge E87 / L
 - 🎞️ Multi-image slideshows (MJPG AVI)
 - 🖼️ Animated GIFs
 - 🧧 Danmaku — scrolling text with custom colours
+- ⚡ **Instant asset switching** (experimental) — flip between already-uploaded files with one tiny command instead of re-uploading. See [`docs/instant-switching.md`](docs/instant-switching.md).
 
 Built on top of:
 
@@ -33,9 +34,37 @@ e87 text "Hello" --size 96 --colour white    # rendered text
 e87 slideshow a.png b.png c.png --ms 600     # multi-image slideshow
 e87 gif pulse.gif                            # animated GIF
 e87 danmaku "Welcome!" --fg red --bg yellow  # scrolling text
+
+# instant switching (experimental — run `e87 probe` first to confirm support)
+e87 probe                                    # does this badge support switching?
+e87 show '啜20260610153000.jpg'               # display an already-uploaded file
+e87 current                                  # what's on screen right now?
+e87 ls                                        # list files stored on the badge
 ```
 
 Pass `--address AA:BB:CC:DD:EE:FF` to target a specific badge (otherwise discovery picks the first one).
+
+---
+
+## ⚡ Instant asset switching (experimental)
+
+The badge stores every upload as its own persistent file, so you can **preload
+several assets once and then flip between them with a single sub-second
+command** — no re-upload. Ideal for reactive displays (idle ↔ active, etc.)
+where a 30-second GIF re-send would kill the interaction.
+
+```python
+async with E87Client(addr) as badge:
+    idle   = await badge.send_gif("idle.gif")     # returns the device path
+    active = await badge.send_gif("active.gif")
+    await badge.show_file(active)                  # instant
+    await badge.show_file(idle)                    # instant
+```
+
+This is reverse-engineered from the JieLi SDK and **not yet confirmed on all
+firmware**; `await badge.probe_switching()` (or `e87 probe`) reports whether
+your unit supports it, and `show_file` raises `E87ProtocolError` if not so you
+can fall back to re-upload. Full guide: [`docs/instant-switching.md`](docs/instant-switching.md).
 
 Library API:
 

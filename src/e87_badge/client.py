@@ -51,6 +51,10 @@ class E87Client:
         self._client: BleakClient | None = None
         self._bus = NotifyBus()
         self._authed = False
+        self._dial_sn = 0x40
+        self.last_path: str | None = None
+        """Device-side path of the most recent successful upload. Pass it to
+        :meth:`show_file` later to redisplay that asset without re-uploading."""
 
     # ── async context ───────────────────────────────────────────────────
 
@@ -132,12 +136,15 @@ class E87Client:
 
     # ── Public send_* methods ──────────────────────────────────────────
 
-    async def send_image(self, image: ImageInput) -> None:
-        """Encode and send a static image. Accepts a path, bytes, or PIL Image."""
+    async def send_image(self, image: ImageInput) -> str | None:
+        """Encode and send a static image. Accepts a path, bytes, or PIL Image.
+
+        Returns the device-side path the badge stored it under (also saved as
+        :attr:`last_path`), so you can later :meth:`show_file` it instantly."""
         from .media.image import encode_jpeg
 
         jpeg = encode_jpeg(image)
-        await self._send_blob(jpeg, extension=EXTENSION_STATIC)
+        return await self._send_blob(jpeg, extension=EXTENSION_STATIC)
 
     async def send_text(
         self,
@@ -147,12 +154,12 @@ class E87Client:
         size: int = 72,
         colour: str | tuple = "white",
         bg: str | tuple = "black",
-    ) -> None:
+    ) -> str | None:
         """Render `text` centered on a 368² frame and send as a static image."""
         from .media.image import render_text_image
 
         jpeg = render_text_image(text, font=font, size=size, colour=colour, bg=bg)
-        await self._send_blob(jpeg, extension=EXTENSION_STATIC)
+        return await self._send_blob(jpeg, extension=EXTENSION_STATIC)
 
     async def send_slideshow(
         self,
@@ -160,17 +167,17 @@ class E87Client:
         *,
         frame_ms: int = 500,
         loop: bool = True,
-    ) -> None:
+    ) -> str | None:
         from .media.slideshow import build_slideshow
 
         avi = build_slideshow(images, frame_ms=frame_ms, loop=loop)
-        await self._send_blob(avi, extension=EXTENSION_ANIMATED)
+        return await self._send_blob(avi, extension=EXTENSION_ANIMATED)
 
-    async def send_gif(self, src: "str | pathlib.Path | bytes", *, max_fps: int = 24) -> None:
+    async def send_gif(self, src: "str | pathlib.Path | bytes", *, max_fps: int = 24) -> str | None:
         from .media.gif import gif_to_avi
 
         avi = gif_to_avi(src, max_fps=max_fps)
-        await self._send_blob(avi, extension=EXTENSION_ANIMATED)
+        return await self._send_blob(avi, extension=EXTENSION_ANIMATED)
 
     async def send_danmaku(
         self,
@@ -182,7 +189,7 @@ class E87Client:
         font_size: int = 64,
         speed_px_per_frame: int = 4,
         fps: int = 20,
-    ) -> None:
+    ) -> str | None:
         from .media.danmaku import render_danmaku
 
         avi = render_danmaku(
@@ -194,15 +201,104 @@ class E87Client:
             speed_px_per_frame=speed_px_per_frame,
             fps=fps,
         )
-        await self._send_blob(avi, extension=EXTENSION_ANIMATED)
+        return await self._send_blob(avi, extension=EXTENSION_ANIMATED)
 
     # ── Internals ──────────────────────────────────────────────────────
 
-    async def _send_blob(self, data: bytes, *, extension: str) -> None:
+    async def _send_blob(self, data: bytes, *, extension: str) -> str | None:
         if self._client is None or not self._authed:
             raise E87ConnectError("not connected — call connect() or use `async with`")
         session = UploadSession(self._write_ae01, self._write_fd02, self._bus)
-        await session.run(data, extension=extension)
+        path = await session.run(data, extension=extension)
+        if path is not None:
+            self.last_path = path
+        return path
+
+    # ── Gallery: switch between already-uploaded assets (EXPERIMENTAL) ──────
+    #
+    # See e87_badge.gallery for the full caveat. The badge stores every upload
+    # as its own persistent file, so these flip the display between preloaded
+    # assets with a single tiny command instead of a multi-second re-upload —
+    # *if* this firmware implements the RCSP dial-switch opcode. Run
+    # `await client.probe_switching()` (or `e87 probe`) once to find out.
+
+    def _next_sn(self) -> int:
+        self._dial_sn = (self._dial_sn + 1) & 0xFF
+        return self._dial_sn
+
+    async def show_file(self, path: str) -> None:
+        """Instantly display an already-stored file by its device path.
+
+        `path` is what an upload returned (see :attr:`last_path` /
+        :meth:`send_image`) or what :meth:`list_files` / :meth:`current_file`
+        reported. Raises :class:`E87ProtocolError` if the firmware does not
+        support switching — fall back to re-uploading in that case.
+        """
+        from . import gallery
+
+        self._require_session()
+        await gallery.set_using_dial(self._write_ae01, self._bus, self._next_sn(), path)
+
+    async def current_file(self) -> str:
+        """Return the device path of the file currently on screen ('' if unknown)."""
+        from . import gallery
+
+        self._require_session()
+        return await gallery.get_using_dial(self._write_ae01, self._bus, self._next_sn())
+
+    async def list_files(self) -> list[str]:
+        """EXPERIMENTAL: enumerate files stored on the badge (RCSP file-browse)."""
+        from . import gallery
+
+        self._require_session()
+        return await gallery.list_files(self._write_ae01, self._bus, self._next_sn())
+
+    async def probe_switching(self) -> dict[str, Any]:
+        """One-shot hardware probe: does this badge support instant switching?
+
+        Tries the read/list/switch commands and reports, per capability,
+        whether the firmware answered. Pass `roundtrip_path` by calling
+        :meth:`show_file` yourself afterwards if you want a visible flip.
+        Safe: it only *reads* current state and attempts a no-op-ish switch to
+        whatever is already showing.
+        """
+        from . import gallery
+        from .errors import E87ProtocolError
+
+        self._require_session()
+        report: dict[str, Any] = {}
+
+        try:
+            cur = await gallery.get_using_dial(self._write_ae01, self._bus, self._next_sn())
+            report["get_using_dial"] = {"supported": True, "current_path": cur}
+        except (E87ProtocolError, TimeoutError) as exc:
+            report["get_using_dial"] = {"supported": False, "error": str(exc)}
+
+        try:
+            files = await gallery.list_files(self._write_ae01, self._bus, self._next_sn())
+            report["file_browse"] = {"supported": True, "files": files}
+        except (E87ProtocolError, TimeoutError) as exc:
+            report["file_browse"] = {"supported": False, "error": str(exc)}
+
+        # Try switching to the currently-shown file (visually a no-op) so we
+        # learn whether SET_USING_DIAL is acknowledged without changing state.
+        target = (report.get("get_using_dial") or {}).get("current_path") or self.last_path
+        if target:
+            try:
+                await gallery.set_using_dial(self._write_ae01, self._bus, self._next_sn(), target)
+                report["set_using_dial"] = {"supported": True, "tried_path": target}
+            except (E87ProtocolError, TimeoutError) as exc:
+                report["set_using_dial"] = {"supported": False, "error": str(exc)}
+        else:
+            report["set_using_dial"] = {
+                "supported": None,
+                "error": "no known path to switch to; upload something first",
+            }
+        return report
+
+    def _require_session(self) -> None:
+        if self._client is None or not self._authed:
+            raise E87ConnectError("not connected — call connect() or use `async with`")
 
     async def _resolve_ble_device(self) -> BLEDevice | str:
         if isinstance(self._input, str):
