@@ -16,6 +16,7 @@
   <div class="wrap">
     <span class="brand">e87<span class="dot">_</span>badge</span>
     <div class="nav-links">
+      <a href="#hardware">The device</a>
       <a href="#features">Features</a>
       <a href="#start">Get started</a>
       <a href="#switch">Instant switching</a>
@@ -45,6 +46,32 @@
     </div>
   </div>
 </header>
+
+<!-- ── The hardware ─────────────────────────────────────────────────── -->
+<section id="hardware">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="kicker">The hardware</span>
+      <h2 class="section-title">A 1.7-inch screen<br>you pin to your jacket.</h2>
+      <p class="section-lead">The E87 is a round 368&nbsp;×&nbsp;368 LCD badge — sold generically for anime and cosplay fans, normally locked to its own phone app. This library talks to it directly over Bluetooth. Below: two of ours, photographed running code from this repo.</p>
+    </div>
+    <figure class="photo reveal">
+      <div class="shot"><img src="assets/img/hardware-lead.jpg" alt="Two round E87 badges on a desk — one in Bluetooth pairing mode, one showing a colourful bullseye test pattern." loading="lazy" width="1280" height="900"></div>
+      <figcaption>Two E87 badges, driven from a Mac. Left: Bluetooth pairing mode — the only screen the badge is connectable from. Right: a bullseye we pushed over BLE to confirm the upload path end-to-end.</figcaption>
+    </figure>
+    <div class="photo-grid">
+      <figure class="photo reveal">
+        <div class="shot square"><img src="assets/img/hardware-rings.jpg" alt="Close-up of the round badge displaying glowing concentric rainbow rings around the word HELLO." loading="lazy" width="900" height="900"></div>
+        <figcaption>368&nbsp;×&nbsp;368, ~283&nbsp;PPI. Any JPEG, GIF or short video maps onto the circular panel; the corners simply fall outside the bezel.</figcaption>
+      </figure>
+      <figure class="photo reveal">
+        <div class="shot square"><img src="assets/img/hardware-pairing.jpg" alt="Close-up of the badge showing the green Bluetooth pairing-mode screen." loading="lazy" width="900" height="900"></div>
+        <figcaption>The JieLi-based BLE stack. One short press puts it in matching mode; from there the client connects, authenticates, and streams.</figcaption>
+      </figure>
+    </div>
+    <p class="section-lead reveal" style="margin-top:36px;font-size:15px;color:var(--text-mute)">Sold under many names as the “E87” badge — <a href="https://www.amazon.com/PilotStars-E87-Electronic-Resolution-Connection/dp/B0GCJD1JCL">Amazon</a>, AliExpress, and others. This project is an independent, reverse-engineered client; it isn’t affiliated with any seller.</p>
+  </div>
+</section>
 
 <!-- ── Features ─────────────────────────────────────────────────────── -->
 <section id="features">
