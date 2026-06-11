@@ -87,7 +87,7 @@
       <div class="card reveal"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="13" height="13" rx="2.6" opacity="0.45"/><rect x="4" y="7" width="13" height="13" rx="2.6"/></svg></span><h3>Slideshows</h3><p>Stitch multiple images into a looping MJPG animation, on-device.</p></div>
       <div class="card reveal"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10.2 9.2v5.6l4.6-2.8z" fill="currentColor" stroke="none"/></svg></span><h3>Animated GIFs</h3><p>Drop in a GIF; it's transcoded and looped on the badge automatically.</p></div>
       <div class="card reveal"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14a1.6 1.6 0 0 1 1.6 1.6v7.8A1.6 1.6 0 0 1 19 16h-8.5L6 19.2V16H5a1.6 1.6 0 0 1-1.6-1.6V6.6A1.6 1.6 0 0 1 5 5z"/><path d="M7 9.6h6"/><path d="M7 12.6h8.6"/></svg></span><h3>Danmaku</h3><p>Scrolling text in any colour — the classic bullet-comment look.</p></div>
-      <div class="card reveal"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.8 5.6 13.2H11l-1 8 7.4-10.4H12z"/></svg></span><h3>Instant switching</h3><p>Preload assets once, then flip between them with a single command. <a href="#switch">Learn more →</a></p></div>
+      <div class="card reveal"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.8 5.6 13.2H11l-1 8 7.4-10.4H12z"/></svg></span><h3>Instant switching</h3><p>A switch-by-reference command exists — but the firmware we tested rejects it. <a href="#switch">The honest story →</a></p></div>
     </div>
   </div>
 </section>
@@ -134,9 +134,9 @@ asyncio.<span class="tok-fn">run</span>(main())</code></pre>
 <section id="switch">
   <div class="wrap">
     <div class="section-head reveal">
-      <span class="kicker">The headline feature</span>
-      <h2 class="section-title">Preload once.<br>Switch instantly.</h2>
-      <p class="section-lead">Uploading is slow — 5–15&nbsp;s for an image, 30–60&nbsp;s for an animation. So we found the command that flips between assets you've <em>already</em> sent. No re-upload. Sub-second.</p>
+      <span class="kicker">An honest negative result</span>
+      <h2 class="section-title">We found the switch.<br>The firmware won't run it.</h2>
+      <p class="section-lead">Uploading is slow — 5–15&nbsp;s for a still. The device's own SDK has a command to flip between assets you've <em>already</em> sent, with no re-upload. So we implemented it… then tested it on real hardware. On firmware <strong>V11.1.0.3</strong> the badge <strong>rejects it</strong>.</p>
     </div>
 
     <div class="split" style="margin-bottom:64px">
@@ -149,28 +149,25 @@ asyncio.<span class="tok-fn">run</span>(main())</code></pre>
     active = <span class="tok-kw">await</span> badge.<span class="tok-fn">send_gif</span>(<span class="tok-str">"active.gif"</span>)
 
     <span class="tok-kw">async for</span> present <span class="tok-kw">in</span> <span class="tok-fn">presence</span>():   <span class="tok-com"># your sensor</span>
-        <span class="tok-kw">await</span> badge.<span class="tok-fn">show_file</span>(active <span class="tok-kw">if</span> present <span class="tok-kw">else</span> idle)</code></pre>
+        <span class="tok-kw">await</span> badge.<span class="tok-fn">show_file</span>(active <span class="tok-kw">if</span> present <span class="tok-kw">else</span> idle)
+        <span class="tok-com"># ↑ raises E87ProtocolError on V11.1.0.3 — wrap + re-upload</span></code></pre>
         </div>
       </div>
       <div class="reveal">
-        <span class="kicker">How it works</span>
-        <h2 style="font-size:clamp(26px,3.4vw,40px)">A filename, not a file.</h2>
-        <p>Every upload is committed to its own persistent file on the badge. The switch is one tiny RCSP command carrying that path — the difference between mailing a photo and pointing at one already on the wall.</p>
+        <span class="kicker">What the badge says</span>
+        <h2 style="font-size:clamp(26px,3.4vw,40px)">Acknowledged — then refused.</h2>
+        <p>The badge accepts the command at the transport layer, then answers with RCSP status <code style="font-family:var(--mono);color:#e6c07b">0x02</code>: the “watch dial” subsystem this needs isn't wired up in the display-badge firmware, so it always shows the most-recently-uploaded file. (Curiously, <em>file-browse</em> is accepted — the filesystem is enumerable; there's just no “show this one.”)</p>
         <div class="stat-row">
-          <div class="stat"><div class="n">&lt;1s</div><div class="l">to switch</div></div>
-          <div class="stat"><div class="n">~30&nbsp;B</div><div class="l">command size</div></div>
-          <div class="stat"><div class="n">0</div><div class="l">bytes re-uploaded</div></div>
+          <div class="stat"><div class="n">0x02</div><div class="l">RCSP reject status</div></div>
+          <div class="stat"><div class="n">✗</div><div class="l">switch on V11.1.0.3</div></div>
+          <div class="stat"><div class="n">~4s</div><div class="l">re-upload fallback</div></div>
         </div>
       </div>
     </div>
 
     <div class="reveal narrow" style="margin:0 auto">
       <div class="note">
-        <strong>Honest status: experimental.</strong> This was reverse-engineered from the badge's
-        bundled SDK and isn't yet confirmed on every firmware build. One command —
-        <code style="font-family:var(--mono);color:#e6c07b">e87 probe</code> — tests your badge and reports
-        exactly what it supports, and <code style="font-family:var(--mono);color:#e6c07b">show_file()</code>
-        fails loudly so you can fall back to a normal upload. <a href="instant-switching.html">Read the full guide →</a>
+        <strong>Why ship it anyway?</strong> The command is real, and other or newer firmware may honour it. <code style="font-family:var(--mono);color:#e6c07b">e87 probe</code> checks any unit by reading the status byte, and <code style="font-family:var(--mono);color:#e6c07b">show_file()</code> raises <code style="font-family:var(--mono);color:#e6c07b">E87ProtocolError</code> so your code falls back to a normal upload automatically. <a href="instant-switching.html">Read the full investigation →</a>
       </div>
     </div>
   </div>
