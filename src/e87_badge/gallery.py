@@ -8,11 +8,14 @@
    the SDK's command registry; every upload is committed as its own persistent
    file). But on the one firmware we have measured (**V11.1.0.3**) the badge
    **rejects the dial-action opcode** — `SET_USING_DIAL` and even `GET_USING_DIAL`
-   return RCSP status ``0x02`` — so display-by-reference does not work and these
-   calls raise :class:`~e87_badge.errors.E87ProtocolError`. The "watch dial"
-   subsystem simply isn't wired up in this display-badge firmware; the badge
-   always shows the most recently uploaded file. (File *browse*, cmd 0x0c, is
-   accepted — so the filesystem is enumerable even though switching is not.)
+   return RCSP status ``0x02`` — which JieLi's own ``StateCode`` defines as
+   ``STATUS_UNKNOWN_CMD`` (the firmware literally reports the command as unknown).
+   So display-by-reference does not work and these calls raise
+   :class:`~e87_badge.errors.E87ProtocolError`. The "watch dial" subsystem simply
+   isn't wired up in this display-badge firmware; the badge always shows the most
+   recently uploaded file. (File *browse*, cmd 0x0c, is accepted — so the
+   filesystem is enumerable even though switching is not. The legacy "qix"
+   command channel was also tested — SET_THEME/SET_PUSH_DIAL drew no response.)
 
    Kept in the library because (a) other/newer firmware may implement it, and
    (b) :func:`probe_switching` / ``e87 probe`` is the honest way to check any

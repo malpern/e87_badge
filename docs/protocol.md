@@ -496,15 +496,23 @@ Provenance: `com/jieli/jl_filebrowse/bean/PathData.java`,
 The opcodes exist in the device's SDK, but a hardware test settled what the
 **firmware** actually honors. On a badge running **V11.1.0.3**:
 
-| Command | RCSP response status | Result |
+| Command | Response status | Result |
 |---|---|---|
-| `EXTERNAL_FLASH_IOCTRL` dial-action `GET_USING_DIAL` (0x1A, op3 flag0) | `0x02` | rejected |
-| `EXTERNAL_FLASH_IOCTRL` dial-action `SET_USING_DIAL` (0x1A, op3 flag1) | `0x02` | rejected |
-| `FILE_BROWSE` (0x0C) | `0x00` | accepted |
+| `EXTERNAL_FLASH_IOCTRL` dial-action `GET_USING_DIAL` (0x1A, op3 flag0) | `0x02` = `STATUS_UNKNOWN_CMD` | rejected |
+| `EXTERNAL_FLASH_IOCTRL` dial-action `SET_USING_DIAL` (0x1A, op3 flag1) | `0x02` = `STATUS_UNKNOWN_CMD` | rejected |
+| `FILE_BROWSE` (0x0C) | `0x00` = `STATUS_SUCCESS` | accepted |
+| qix `SET_THEME` (0x19) / `SET_PUSH_DIAL` (0x1C), FD02 + FD03 | *(no response)* | no effect |
+
+`0x02` is `STATUS_UNKNOWN_CMD` in JieLi's own `StateCode` — the firmware
+explicitly reports the dial-action as an unknown command (returned even for the
+parameter-less `GET_USING_DIAL`, so it isn't a path/argument problem). The
+legacy "qix" command stack was also tested over both `C2E6FD02` and the
+`C2E6FD03` control channel: the dial/theme/picture commands drew **no response**
+and changed nothing on screen.
 
 So **display-by-reference (instant switching) is NOT supported on V11.1.0.3** —
-the dial subsystem isn't implemented in this display-badge firmware; the badge
-shows the most-recently-uploaded file and the switch command errors. File
-browse *is* accepted, so the filesystem is enumerable. Other firmware may
-differ — use `e87 probe` / `E87Client.probe_switching()` (it checks the status
-byte) on any given unit. See [`instant-switching.md`](instant-switching.md).
+the watch-dial subsystem isn't implemented in this display-badge firmware; the
+badge shows the most-recently-uploaded file. File browse *is* accepted, so the
+filesystem is enumerable. Other firmware may differ — use `e87 probe` /
+`E87Client.probe_switching()` (it checks the status byte) on any given unit. See
+[`instant-switching.md`](instant-switching.md).
