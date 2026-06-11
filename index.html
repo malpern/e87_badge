@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>e87_badge — drive the E87 Bluetooth badge from your code</title>
+<meta name="description" content="Open client for the round E-Badge E87 / L8 Bluetooth pin. Upload images, GIFs, slideshows and scrolling text — and switch between preloaded assets instantly.">
+<meta property="og:title" content="e87_badge">
+<meta property="og:description" content="Drive the round E87 Bluetooth badge from your own code. Now with instant asset switching.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <span class="brand">e87<span class="dot">_</span>badge</span>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#start">Get started</a>
+      <a href="#switch">Instant switching</a>
+      <a href="protocol.html">Protocol</a>
+    </div>
+    <a class="nav-gh" href="https://github.com/malpern/e87_badge">GitHub ↗</a>
+  </div>
+</nav>
+
+<!-- ── Hero ─────────────────────────────────────────────────────────── -->
+<header class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-inner">
+    <div class="badge-stage">
+      <div class="badge"><canvas id="badge-eye" class="badge-screen"></canvas></div>
+    </div>
+    <span class="eyebrow" style="margin-top:44px">Open client · reverse-engineered · MIT</span>
+    <h1 class="hero-title">The badge,<br>under your control.</h1>
+    <p class="hero-sub">
+      A clean Python client for the round <strong style="color:var(--text);font-weight:500">E-Badge E87</strong> Bluetooth pin —
+      the one that normally only talks to its own app. Push images, GIFs, slideshows and scrolling
+      text to the 368&nbsp;×&nbsp;368 screen in a few lines of code.
+    </p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#start">Get started</a>
+      <a class="btn btn-ghost" href="#switch">⚡ Instant switching</a>
+    </div>
+  </div>
+</header>
+
+<!-- ── Features ─────────────────────────────────────────────────────── -->
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="kicker">Everything the screen can hold</span>
+      <h2 class="section-title">One library. The whole canvas.</h2>
+      <p class="section-lead">Connect over BLE, run the JieLi mutual-auth handshake, and send anything to the round display.</p>
+    </div>
+    <div class="grid">
+      <div class="card reveal"><span class="ico">🖼️</span><h3>Images</h3><p>JPEG or PNG, auto-fit and encoded to the badge's 368² round screen.</p></div>
+      <div class="card reveal"><span class="ico">📝</span><h3>Text</h3><p>Render any string centred on the display, at the size and colour you choose.</p></div>
+      <div class="card reveal"><span class="ico">🎞️</span><h3>Slideshows</h3><p>Stitch multiple images into a looping MJPG animation, on-device.</p></div>
+      <div class="card reveal"><span class="ico">✨</span><h3>Animated GIFs</h3><p>Drop in a GIF; it's transcoded and looped on the badge automatically.</p></div>
+      <div class="card reveal"><span class="ico">🧧</span><h3>Danmaku</h3><p>Scrolling text in any colour — the classic bullet-comment look.</p></div>
+      <div class="card reveal"><span class="ico">⚡</span><h3>Instant switching</h3><p>Preload assets once, then flip between them with a single command. <a href="#switch">Learn more →</a></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Quick start ──────────────────────────────────────────────────── -->
+<section id="start" style="background:linear-gradient(180deg,transparent,rgba(41,151,255,0.035),transparent)">
+  <div class="wrap">
+    <div class="split">
+      <div class="reveal">
+        <span class="kicker">Five lines to first pixel</span>
+        <h2>From <code style="font-size:0.8em">pip install</code> to glowing in under a minute.</h2>
+        <p>No SDK, no app, no account. Discover the badge, connect, and send. The same <code style="font-family:var(--mono);font-size:0.85em;color:#e6c07b">E87Client</code> works from a script, a daemon, or Home Assistant.</p>
+        <div class="hero-cta" style="justify-content:flex-start;margin-top:26px">
+          <a class="btn btn-primary" href="getting-started.html">Read the guide</a>
+          <a class="btn btn-ghost" href="https://github.com/malpern/e87_badge">View source</a>
+        </div>
+      </div>
+      <div class="reveal">
+        <div class="code-win">
+          <div class="code-bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">hello_badge.py</span></div>
+<pre><code><span class="tok-kw">import</span> asyncio
+<span class="tok-kw">from</span> e87_badge <span class="tok-kw">import</span> <span class="tok-cls">E87Client</span>
+
+<span class="tok-kw">async def</span> <span class="tok-fn">main</span>():
+    <span class="tok-kw">async with</span> <span class="tok-cls">E87Client</span>(<span class="tok-str">"46:8B:00:01:83:9C"</span>) <span class="tok-kw">as</span> badge:
+        <span class="tok-kw">await</span> badge.<span class="tok-fn">send_text</span>(<span class="tok-str">"Hello"</span>, size=<span class="tok-num">96</span>)
+        <span class="tok-kw">await</span> badge.<span class="tok-fn">send_gif</span>(<span class="tok-str">"pulse.gif"</span>)
+
+asyncio.<span class="tok-fn">run</span>(main())</code></pre>
+        </div>
+        <div class="code-win" style="margin-top:16px">
+          <div class="code-bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">terminal</span></div>
+<pre><code><span class="tok-com">$</span> e87 discover
+<span class="tok-str">46:8B:00:01:83:9C    E87</span>
+<span class="tok-com">$</span> e87 image photo.png
+<span class="tok-com">$</span> e87 danmaku <span class="tok-str">"Welcome!"</span> --fg red</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Instant switching ────────────────────────────────────────────── -->
+<section id="switch">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="kicker">The headline feature</span>
+      <h2 class="section-title">Preload once.<br>Switch instantly.</h2>
+      <p class="section-lead">Uploading is slow — 5–15&nbsp;s for an image, 30–60&nbsp;s for an animation. So we found the command that flips between assets you've <em>already</em> sent. No re-upload. Sub-second.</p>
+    </div>
+
+    <div class="split" style="margin-bottom:64px">
+      <div class="reveal">
+        <div class="code-win">
+          <div class="code-bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">reactive.py</span></div>
+<pre><code><span class="tok-kw">async with</span> <span class="tok-cls">E87Client</span>(addr) <span class="tok-kw">as</span> badge:
+    <span class="tok-com"># upload each asset once — returns its on-device path</span>
+    idle   = <span class="tok-kw">await</span> badge.<span class="tok-fn">send_gif</span>(<span class="tok-str">"idle.gif"</span>)
+    active = <span class="tok-kw">await</span> badge.<span class="tok-fn">send_gif</span>(<span class="tok-str">"active.gif"</span>)
+
+    <span class="tok-kw">async for</span> present <span class="tok-kw">in</span> <span class="tok-fn">presence</span>():   <span class="tok-com"># your sensor</span>
+        <span class="tok-kw">await</span> badge.<span class="tok-fn">show_file</span>(active <span class="tok-kw">if</span> present <span class="tok-kw">else</span> idle)</code></pre>
+        </div>
+      </div>
+      <div class="reveal">
+        <span class="kicker">How it works</span>
+        <h2 style="font-size:clamp(26px,3.4vw,40px)">A filename, not a file.</h2>
+        <p>Every upload is committed to its own persistent file on the badge. The switch is one tiny RCSP command carrying that path — the difference between mailing a photo and pointing at one already on the wall.</p>
+        <div class="stat-row">
+          <div class="stat"><div class="n">&lt;1s</div><div class="l">to switch</div></div>
+          <div class="stat"><div class="n">~30&nbsp;B</div><div class="l">command size</div></div>
+          <div class="stat"><div class="n">0</div><div class="l">bytes re-uploaded</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="reveal narrow" style="margin:0 auto">
+      <div class="note">
+        <strong>Honest status: experimental.</strong> This was reverse-engineered from the badge's
+        bundled SDK and isn't yet confirmed on every firmware build. One command —
+        <code style="font-family:var(--mono);color:#e6c07b">e87 probe</code> — tests your badge and reports
+        exactly what it supports, and <code style="font-family:var(--mono);color:#e6c07b">show_file()</code>
+        fails loudly so you can fall back to a normal upload. <a href="instant-switching.html">Read the full guide →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Protocol teaser ──────────────────────────────────────────────── -->
+<section style="background:linear-gradient(180deg,transparent,rgba(48,214,198,0.04),transparent)">
+  <div class="wrap split">
+    <div class="reveal">
+      <span class="kicker">No magic, just bytes</span>
+      <h2>Every frame, documented.</h2>
+      <p>The protocol was recovered from BLE captures and a decompiled APK, then re-implemented in clean Python — FE framing, the JieLi auth cipher, the windowed upload state machine, and the newly-found switch commands. It's all written down.</p>
+      <div class="hero-cta" style="justify-content:flex-start;margin-top:24px">
+        <a class="btn btn-ghost" href="protocol.html">Protocol reference →</a>
+      </div>
+    </div>
+    <div class="reveal">
+      <div class="code-win">
+        <div class="code-bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">switch · on the wire</span></div>
+<pre><code><span class="tok-com"># SET_USING_DIAL — display a stored file</span>
+FE DC BA <span class="tok-num">C0</span> <span class="tok-num">1A</span> <span class="tok-op">..</span> <span class="tok-fn">sn</span> <span class="tok-num">03</span> <span class="tok-num">01</span> <span class="tok-str">&lt;path&gt;</span> EF
+         <span class="tok-com">│  │      │  │  └ flag 01 = set</span>
+         <span class="tok-com">│  │      │  └─── op 03 = dial action</span>
+         <span class="tok-com">│  └ cmd 0x1A (RCSP ExternalFlash)</span>
+         <span class="tok-com">└─── flag C0 = command</span></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA band ─────────────────────────────────────────────────────── -->
+<section class="band reveal">
+  <div class="wrap">
+    <h2 class="section-title">Make the badge yours.</h2>
+    <p class="section-lead">Install the client, point it at a badge, and start shipping pixels.</p>
+    <div class="hero-cta" style="margin-top:34px">
+      <a class="btn btn-primary" href="getting-started.html">Get started</a>
+      <a class="btn btn-ghost" href="https://github.com/malpern/e87_badge">Star on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>e87_badge · reverse-engineered client for the JieLi E87 badge · MIT</span>
+    <span><a href="https://github.com/malpern/e87_badge">GitHub</a> &nbsp;·&nbsp; <a href="getting-started.html">Docs</a> &nbsp;·&nbsp; <a href="protocol.html">Protocol</a></span>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

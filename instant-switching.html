@@ -1,0 +1,182 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instant switching — e87_badge</title>
+<meta name="description" content="Preload assets and switch between them instantly — no re-upload.">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+</head><body>
+<nav class="nav"><div class="wrap">
+  <a class="brand" href="index.html" style="color:var(--text)">e87<span class="dot">_</span>badge</a>
+  <div class="nav-links">
+    <a href="getting-started.html">Get started</a>
+    <a href="instant-switching.html">Instant switching</a>
+    <a href="protocol.html">Protocol</a>
+  </div>
+  <a class="nav-gh" href="https://github.com/malpern/e87_badge">GitHub ↗</a>
+</div></nav>
+<main class="article"><div class="wrap"><div class="prose">
+<a class="backlink" href="index.html">← e87_badge</a>
+<h1>Instant Asset Switching</h1>
+<h3>Flip between preloaded images without re-uploading — a single tiny command instead of a multi-second transfer.</h3>
+<blockquote>
+<p><strong>Status: experimental.</strong> This capability is reverse-engineered from the
+JieLi watch SDK bundled in the Zrun app and is <strong>not yet confirmed against
+shipping E87 firmware</strong>. One <code>e87 probe</code> against your badge tells you whether
+your unit supports it. See <a href="#is-my-badge-supported">Is my badge supported?</a></p>
+</blockquote>
+<hr />
+<h2>The problem</h2>
+<p>Uploading to an E87 is not fast. A still image is <strong>5–15 seconds</strong>; an
+animation is <strong>30–60 seconds</strong>. That's fine when you set a badge once and walk
+away — but it falls apart the moment you want the badge to <em>react</em>.</p>
+<p>Picture a presence badge for a hackathon demo: an <strong>idle</strong> eye that blinks, and
+an <strong>active</strong> eye that locks on when someone walks up. If every state change
+means re-encoding and re-streaming a whole GIF, your "reaction" arrives a
+minute late. You need switching measured in <strong>milliseconds</strong>, not megabytes.</p>
+<h2>The insight</h2>
+<p>Here's the thing we discovered reading the firmware's SDK: <strong>the badge already
+stores every asset you upload as its own persistent file.</strong> When an upload
+finishes, the client answers the device's <code>FILE_COMPLETE</code> with a path, and the
+badge commits the bytes under that name — <code>啜20260610153000.jpg</code>, and so on.
+They don't overwrite a single slot; they <em>accumulate</em>.</p>
+<p>So half of "instant switching" already works today. The missing half is simply:</p>
+<blockquote>
+<p><strong>"Hey badge — show the file I already gave you."</strong></p>
+</blockquote>
+<p>That's one command. It carries a filename, not pixels. It's the difference
+between mailing a photo and pointing at one already on the wall.</p>
+<h2>How it works</h2>
+<p>The switch rides the exact same FE frame as everything else in the protocol:</p>
+<pre><code>FE DC BA │ flag │ cmd │ len(2 BE) │ body │ EF
+</code></pre>
+<p>with <code>cmd = 0x1A</code> (RCSP <em>External-Flash I/O control</em>, opcode 26) and a body of:</p>
+<pre><code>┌──────────┬─────────────────┬──────────────┬─────────────────┐
+│ opCodeSn │ op = 0x03       │ flag         │ payload         │
+│  (1 B)   │ (DIAL_ACTION)   │ 0x01 = set   │ file path (UTF-8)│
+└──────────┴─────────────────┴──────────────┴─────────────────┘
+</code></pre>
+<p>The bytes after the sequence number are precisely JieLi's
+<code>ExternalFlashIOCtrlParam.toData() = [op][flag][payload]</code>. Flag <code>0x00</code> <em>reads</em>
+the current file, <code>0x01</code> <em>switches</em> to the file named in the payload, and the
+device pushes <code>0x02</code> when the active file changes on its own.</p>
+<p>That's the whole feature. ~tens of bytes, one round-trip, sub-second.</p>
+<h2>Your first switch</h2>
+<p>Preload two assets, then flip between them — no re-upload in sight:</p>
+<pre><code class="language-python">import asyncio
+from e87_badge import E87Client
+
+async def main():
+    async with E87Client(&quot;46:8B:00:01:83:9C&quot;) as badge:
+        # Upload once. Each call returns the device path it was stored under.
+        idle   = await badge.send_gif(&quot;idle.gif&quot;)
+        active = await badge.send_gif(&quot;active.gif&quot;)
+        print(&quot;preloaded:&quot;, idle, active)
+
+        # Later — and this is the fast part — just point at one:
+        await badge.show_file(active)   # locks on, instantly
+        await asyncio.sleep(2)
+        await badge.show_file(idle)     # back to blinking, instantly
+
+asyncio.run(main())
+</code></pre>
+<p><code>send_gif</code> / <code>send_image</code> now <strong>return the stored path</strong> (also saved as
+<code>badge.last_path</code>). Hand that path to <code>show_file</code> whenever you like — across
+calls, across reconnects, across program runs. The asset lives on the badge.</p>
+<h3>A reactive loop</h3>
+<p>Because each switch is a single command, you can drive the badge from live
+events at interactive speed:</p>
+<pre><code class="language-python">async with E87Client(addr) as badge:
+    idle   = await badge.send_image(&quot;eye_idle.png&quot;)
+    active = await badge.send_image(&quot;eye_active.png&quot;)
+
+    async for person_present in presence_events():   # your sensor stream
+        await badge.show_file(active if person_present else idle)
+</code></pre>
+<p>No encoding, no chunking, no 30-second wait between reactions.</p>
+<h2>From the command line</h2>
+<pre><code class="language-console">$ e87 image eye_idle.png --address 46:8B:00:01:83:9C
+Stored on device as: 啜20260610153000.jpg
+Redisplay later with:  e87 show '啜20260610153000.jpg' --address 46:8B:00:01:83:9C
+
+$ e87 image eye_active.png --address 46:8B:00:01:83:9C
+Stored on device as: 啜20260610153012.jpg
+
+# now flip between them — each of these is sub-second:
+$ e87 show '啜20260610153012.jpg' --address 46:8B:00:01:83:9C
+$ e87 show '啜20260610153000.jpg' --address 46:8B:00:01:83:9C
+
+$ e87 current --address 46:8B:00:01:83:9C     # what's on screen now?
+啜20260610153000.jpg
+
+$ e87 ls --address 46:8B:00:01:83:9C          # everything stored (experimental)
+啜20260610153000.jpg
+啜20260610153012.jpg
+</code></pre>
+<h2>Is my badge supported?</h2>
+<p>This is the honest part. We know the <strong>protocol</strong> supports switch-by-reference
+— it's right there in the SDK, two independent ways (the RCSP dial action above,
+and a <code>SET_PUSH_DIAL</code> index command on the legacy channel). What we <em>can't</em> know
+from static analysis is whether <strong>your specific firmware build</strong> wired those
+opcodes up, because the stock Zrun app never sends them to the badge — it
+re-uploads on every selection.</p>
+<p>So we built a probe. It reads the current file, attempts a listing, and tries a
+no-op switch to whatever is already showing — then tells you what answered:</p>
+<pre><code class="language-console">$ e87 probe --address 46:8B:00:01:83:9C
+{
+  &quot;get_using_dial&quot;: { &quot;supported&quot;: true,  &quot;current_path&quot;: &quot;啜20260610153000.jpg&quot; },
+  &quot;file_browse&quot;:    { &quot;supported&quot;: false, &quot;error&quot;: &quot;...did not answer...&quot; },
+  &quot;set_using_dial&quot;: { &quot;supported&quot;: true,  &quot;tried_path&quot;: &quot;啜20260610153000.jpg&quot; }
+}
+
+Instant switching: SUPPORTED on this badge ✅
+</code></pre>
+<p>Programmatically:</p>
+<pre><code class="language-python">async with E87Client(addr) as badge:
+    report = await badge.probe_switching()
+    if report[&quot;set_using_dial&quot;][&quot;supported&quot;]:
+        ...  # use show_file
+</code></pre>
+<p>If the probe comes back unsupported, nothing is lost — <code>show_file</code> raises
+<code>E87ProtocolError</code>, and you fall back to the upload path you already have:</p>
+<pre><code class="language-python">from e87_badge import E87ProtocolError
+
+try:
+    await badge.show_file(active)
+except E87ProtocolError:
+    await badge.send_gif(&quot;active.gif&quot;)   # graceful fallback
+</code></pre>
+<h2>Design notes</h2>
+<ul>
+<li><strong>Why a path, not an index?</strong> The RCSP dial action addresses files by name
+  in the badge's FAT filesystem, which is exactly what an upload returns. No
+  bookkeeping of slot numbers; the path <em>is</em> the handle.</li>
+<li><strong>Sequence numbers.</strong> Switch/query commands carry their own <code>opCodeSn</code>,
+  managed by the client (<code>_next_sn</code>) independently of the upload state machine,
+  so you can interleave switches and uploads freely.</li>
+<li><strong><code>current_file()</code> decoding is liberal.</strong> Firmware responses vary in framing
+  (status byte present or not), so the parser pulls the trailing path-like run
+  rather than assuming fixed offsets. Treat the result as advisory.</li>
+<li><strong><code>list_files()</code> is the least-certain piece.</strong> JieLi's file-browse uses a
+  separate response encoding we only partially decode. You rarely need it —
+  prefer the paths returned by your uploads.</li>
+</ul>
+<h2>Under the hood</h2>
+<p>If you want to build commands yourself, the pure builders are in
+<a href="https://github.com/malpern/e87_badge/blob/feat/instant-asset-switching/src/e87_badge/gallery.py"><code>e87_badge.gallery</code></a>:</p>
+<pre><code class="language-python">from e87_badge import gallery
+
+frame = gallery.build_set_using_dial_frame(sn=0x10, path=&quot;啜...jpg&quot;)
+# -&gt; FE DC BA C0 1A &lt;len&gt; 10 03 01 &lt;utf8 path&gt; EF
+</code></pre>
+<p>and the protocol provenance — every byte traced back to a decompiled SDK class —
+is documented in <a href="protocol.html"><code>protocol.md</code></a> and the investigation writeup that
+accompanies this feature.</p>
+</div></div></main>
+<footer><div class="wrap">
+  <span>e87_badge · reverse-engineered client for the JieLi E87 badge · MIT</span>
+  <span><a href="https://github.com/malpern/e87_badge">GitHub</a> &nbsp;·&nbsp; <a href="getting-started.html">Docs</a> &nbsp;·&nbsp; <a href="protocol.html">Protocol</a></span>
+</div></footer>
+<script src="assets/app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+</body></html>

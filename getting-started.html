@@ -1,0 +1,91 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting started — e87_badge</title>
+<meta name="description" content="Install the e87_badge client, find your badge, and send your first pixels.">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+</head><body>
+<nav class="nav"><div class="wrap">
+  <a class="brand" href="index.html" style="color:var(--text)">e87<span class="dot">_</span>badge</a>
+  <div class="nav-links">
+    <a href="getting-started.html">Get started</a>
+    <a href="instant-switching.html">Instant switching</a>
+    <a href="protocol.html">Protocol</a>
+  </div>
+  <a class="nav-gh" href="https://github.com/malpern/e87_badge">GitHub ↗</a>
+</div></nav>
+<main class="article"><div class="wrap"><div class="prose">
+<a class="backlink" href="index.html">← e87_badge</a>
+<h1>Getting started</h1>
+<p class='lede'>Install the client, find your badge, and send your first pixels. No SDK, no app, no account.</p>
+<h2>Install</h2>
+<pre><code class="language-bash">pip install git+https://github.com/jumpingmushroom/e87_badge@v0.1.0
+</code></pre>
+<p>Requires Python 3.11+. It pulls in <code>bleak</code>, <code>bleak-retry-connector</code>, and <code>pillow</code>.</p>
+<h2>Find your badge</h2>
+<p>Put the badge into <strong>Bluetooth matching mode</strong> — a single short press of the BT button, which brings up the QR / pairing screen — then scan:</p>
+<pre><code class="language-console">$ e87 discover
+46:8B:00:01:83:9C    E87
+</code></pre>
+<blockquote>
+<p><strong>The badge is only connectable on its QR-code screen</strong> — not while it's displaying an image. After any failed pairing, <strong>power-cycle the badge</strong> (hold power ~10 s) before retrying; otherwise it holds stale connection state for about three minutes.</p>
+</blockquote>
+<h2>Send something</h2>
+<pre><code class="language-console">$ e87 image my-photo.png  --address 46:8B:00:01:83:9C
+$ e87 text &quot;Hi!&quot; --size 96 --colour white
+$ e87 slideshow a.png b.png c.png --ms 600
+$ e87 gif pulse.gif
+$ e87 danmaku &quot;Welcome!&quot; --fg red --bg black
+</code></pre>
+<p>Omit <code>--address</code> to auto-discover the first badge in range.</p>
+<h2>Library API</h2>
+<pre><code class="language-python">import asyncio
+from e87_badge import E87Client
+
+async def main():
+    async with E87Client(&quot;46:8B:00:01:83:9C&quot;) as badge:
+        await badge.send_image(&quot;welcome.png&quot;)
+        await badge.send_text(&quot;Hi&quot;)
+        await badge.send_slideshow([&quot;a.png&quot;, &quot;b.png&quot;, &quot;c.png&quot;], frame_ms=500)
+        await badge.send_gif(&quot;party.gif&quot;)
+        await badge.send_danmaku(&quot;breaking news!&quot;, fg=&quot;red&quot;, bg=&quot;black&quot;)
+
+asyncio.run(main())
+</code></pre>
+<p><code>E87Client</code> accepts either a MAC-address string <strong>or</strong> a pre-resolved <code>bleak.BLEDevice</code> — the form Home Assistant uses to route through whichever Bluetooth proxy is closest. Every <code>send_*</code> call returns the <strong>device-side path</strong> the asset was stored under: the handle you reuse for <a href="instant-switching.html">instant switching</a>.</p>
+<h2>Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Won't connect / device not found</td>
+<td>Get the badge onto its <strong>QR-code screen</strong>; it only advertises there.</td>
+</tr>
+<tr>
+<td>Connects, then aborts at "initial window ack"</td>
+<td>Normal on the first attempt — retry. Don't press any badge button mid-upload.</td>
+</tr>
+<tr>
+<td>Stuck, won't pair for minutes</td>
+<td><strong>Power-cycle</strong> the badge. One clean attempt per power-cycle.</td>
+</tr>
+<tr>
+<td>Weak or slow transfer</td>
+<td>Keep the badge within ~1 m of the radio.</td>
+</tr>
+</tbody>
+</table>
+</div></div></main>
+<footer><div class="wrap">
+  <span>e87_badge · reverse-engineered client for the JieLi E87 badge · MIT</span>
+  <span><a href="https://github.com/malpern/e87_badge">GitHub</a> &nbsp;·&nbsp; <a href="getting-started.html">Docs</a> &nbsp;·&nbsp; <a href="protocol.html">Protocol</a></span>
+</div></footer>
+<script src="assets/app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+</body></html>

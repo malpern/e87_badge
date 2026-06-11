@@ -1,0 +1,712 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protocol reference — e87_badge</title>
+<meta name="description" content="The full wire-level protocol for the E87 badge: framing, auth, upload, and switching.">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+</head><body>
+<nav class="nav"><div class="wrap">
+  <a class="brand" href="index.html" style="color:var(--text)">e87<span class="dot">_</span>badge</a>
+  <div class="nav-links">
+    <a href="getting-started.html">Get started</a>
+    <a href="instant-switching.html">Instant switching</a>
+    <a href="protocol.html">Protocol</a>
+  </div>
+  <a class="nav-gh" href="https://github.com/malpern/e87_badge">GitHub ↗</a>
+</div></nav>
+<main class="article"><div class="wrap"><div class="prose">
+<a class="backlink" href="index.html">← e87_badge</a>
+<h1>E-Badge E87 BLE Protocol</h1>
+<blockquote>
+<p>Findings here are derived from <code>docs/captures/01-solid-red-360.log</code> (a Zrun upload of a
+360×360 solid red PNG from Samsung Galaxy S24 Ultra, Android 18, Zrun 2.2.5) and from
+static analysis of the Zrun APK (<code>docs/captures/jadx-notes.md</code>). Every capture claim can
+be traced back to <code>docs/captures/01-solid-red-360.ae01-writes.txt</code> unless noted.</p>
+</blockquote>
+<h2>Hardware identification</h2>
+<ul>
+<li><strong>SoC: JieLi (Zhuhai Jieli Technology) AC697 family.</strong> Confirmed by ASCII string
+  <code>jl_sdk_ac697_publish</code> in a badge notification on handle <code>0x0008</code> at t=261.62s
+  (see <code>docs/captures/01-solid-red-360.notifications.txt</code>, line starting
+  <code>261.620147000</code>).</li>
+<li>This is significant: JieLi chips use a well-known proprietary <strong>RCSP (Remote Control
+  Session Protocol)</strong> framing that begins each frame with the sync byte <code>0x9E</code>. Traffic
+  on the proprietary 128-bit service below matches this pattern — that path is generic
+  JieLi RCSP, not badge-specific. The badge-specific image upload path runs on a separate
+  16-bit service and uses a <em>different</em> framing (<code>fedcba…ef</code>), described in its own
+  section below.</li>
+</ul>
+<h2>Advertising</h2>
+<ul>
+<li>Badge MAC: <code>46:8D:00:01:2C:25</code> (static random / locally administered)</li>
+<li>In the capture, the badge's presence was observed via the Android "Filter Accept List"
+  pattern: the Zrun app adds the MAC, briefly scans (~10s), then removes it, repeatedly.
+  Only one active advertising report from the badge is visible in the entire 330s capture.</li>
+<li><strong>No <code>Complete Local Name</code> AD field seen</strong> in Android's regular BT settings — meaning
+  Home Assistant auto-discovery cannot key on <code>local_name</code>. Use service-UUID matching
+  (see below) and/or MAC OUI <code>46:8D:00:…</code> fingerprinting.</li>
+</ul>
+<h2>Pairing / bonding</h2>
+<ul>
+<li><strong>Not bonded.</strong> No SMP Pairing Request / Response is visible on the connection handle
+  <code>0x000f</code> (the badge's connection in this capture). Writes succeed without encryption.</li>
+<li>An application-layer auth handshake is performed instead — see "Authentication (control)"
+  below.</li>
+</ul>
+<h2>Connection parameters</h2>
+<ul>
+<li>Connection established at t=257.08s (LE Enhanced Connection Complete event, frame 14981,
+  subevent <code>0x0a</code>), connection handle <code>0x000f</code>.</li>
+<li><strong>MTU: 517 (negotiated maximum).</strong> Both sides request 517 (frames 15405 client request,
+  15439 server response).</li>
+</ul>
+<h2>GATT structure</h2>
+<table>
+<thead>
+<tr>
+<th>Handle range</th>
+<th>Service UUID</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x0001–0x0003</code></td>
+<td><code>0x1800</code> (GAP)</td>
+<td>Standard Device Name characteristic only</td>
+</tr>
+<tr>
+<td><code>0x0004–0x0009</code></td>
+<td><strong><code>0x00ae</code></strong> (proprietary 16-bit)</td>
+<td><strong>Image upload + control</strong></td>
+</tr>
+<tr>
+<td><code>0x000a–0x0017</code></td>
+<td><strong><code>c2e6fd00-e966-1000-8000-bef9c223df6a</code></strong> (proprietary 128-bit)</td>
+<td><strong>JieLi RCSP</strong> — device info, battery, firmware version, generic control</td>
+</tr>
+<tr>
+<td><code>0x0018–0x001b</code></td>
+<td><code>0x180F</code> (Battery Service)</td>
+<td>Standard battery level</td>
+</tr>
+</tbody>
+</table>
+<h3>Service <code>0x00ae</code> — image upload and badge-specific control</h3>
+<table>
+<thead>
+<tr>
+<th>Handle</th>
+<th>UUID</th>
+<th>Properties</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x0006</code></td>
+<td><code>0xae01</code></td>
+<td>Write Without Response</td>
+<td><strong>Client → badge: control commands AND image data</strong></td>
+</tr>
+<tr>
+<td><code>0x0008</code></td>
+<td><code>0xae02</code></td>
+<td>Notify</td>
+<td><strong>Badge → client: command acks + data-complete signals</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Both control commands and image-data chunks are sent as writes to handle <code>0x0006</code>. The
+two message types are distinguished by their opcode byte (see framing below).</p>
+<h3>Service <code>c2e6fd00-e966-1000-8000-bef9c223df6a</code> — JieLi RCSP</h3>
+<p>The JieLi SDK (<code>jl_sdk</code>) exposes a pair of characteristics for the RCSP protocol.
+Framing for all packets on this service begins with sync byte <code>0x9E</code>. This service is
+out of scope for phase 1 (image upload does not use it) but is documented because
+phase 2's <code>get_info()</code> / battery queries will likely go through here.</p>
+<table>
+<thead>
+<tr>
+<th>Handle</th>
+<th>UUID</th>
+<th>Properties</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x000c</code></td>
+<td><code>c2e6fd02-e966-1000-8000-bef9c223df6a</code></td>
+<td>Write + Write Without Response</td>
+<td>Client → badge: RCSP commands</td>
+</tr>
+<tr>
+<td><code>0x000e</code></td>
+<td><code>c2e6fd01-e966-1000-8000-bef9c223df6a</code></td>
+<td>Notify</td>
+<td>Badge → client: RCSP responses</td>
+</tr>
+<tr>
+<td><code>0x0011</code></td>
+<td><code>c2e6fd03-e966-1000-8000-bef9c223df6a</code></td>
+<td>Notify + Write + Read</td>
+<td>Unclear — possibly OTA / firmware upgrade channel</td>
+</tr>
+<tr>
+<td><code>0x0014</code></td>
+<td><code>c2e6fd04-e966-1000-8000-bef9c223df6a</code></td>
+<td>Write Without Response</td>
+<td>Unclear</td>
+</tr>
+</tbody>
+</table>
+<p>Early on the connection, an indication on <code>0x000e</code> carries the byte sequence
+<code>9e940461 1e0000 32 2e 37 31 31 2e 31 2e 30 2e 33 00 00</code> — the ASCII substring
+<code>2.711.1.0.3</code> is visible, matching the firmware "11.1.0.3" displayed by Zrun's device
+info screen (the <code>2.</code> prefix is the JL SDK version; the "7" then "11.1.0.3" is the
+product firmware).</p>
+<h2>Framing — image-upload service (<code>0x00ae</code>)</h2>
+<p>All packets on characteristic <code>0xae01</code> (handle <code>0x0006</code>, client→badge) and notify
+characteristic <code>0xae02</code> (handle <code>0x0008</code>, badge→client) share the same RCSP envelope
+(confirmed by <code>ParseHelper.packSendBasePacket()</code> in the Zrun APK):</p>
+<pre><code> +----------+-------+--------+--------------+---------+----+
+ | FE DC BA | flags | opCode | paramLen(2B) | body…   | EF |
+ +----------+-------+--------+--------------+---------+----+
+   magic(3B)  (1B)    (1B)   big-endian 16b  (N bytes) (1B)
+</code></pre>
+<ul>
+<li><strong>Magic header:</strong> <code>FE DC BA</code> (3 bytes, always present).</li>
+<li><strong><code>flags</code> byte:</strong></li>
+<li>bit 7 = direction: <code>1</code> = request (phone→badge), <code>0</code> = response (badge→phone)</li>
+<li>bit 6 = hasResponse: <code>1</code> = phone expects an ack notification</li>
+<li>Common values: <code>0xC0</code> (request + hasResponse), <code>0x80</code> (request, no ack expected)</li>
+<li><strong><code>opCode</code></strong> — RCSP command ID (see table below); <strong>not</strong> 0xC0 or 0x80 (those are flags).</li>
+<li><strong><code>paramLen</code></strong> — 16-bit big-endian count of body bytes.</li>
+<li><strong><code>body</code></strong> — layout depends on direction:</li>
+<li>Request: <code>[opCodeSn] [xmOpCode if opCode==1] [paramData...]</code></li>
+<li>Response: <code>[status] [opCodeSn] [xmOpCode if opCode==1] [paramData...]</code></li>
+<li><strong>Trailer:</strong> <code>0xEF</code> (1 byte). The <code>0xEF</code> in paramLen (e.g. <code>01 EF</code> = 495) is numeric,
+  not the trailer; the parser uses paramLen to know where the frame ends.</li>
+<li><strong>Total frame size</strong> = 8 + paramLen bytes.</li>
+</ul>
+<h3>RCSP opCodes used in image upload session</h3>
+<table>
+<thead>
+<tr>
+<th>opCode (hex)</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x01</code></td>
+<td>CMD_DATA</td>
+<td>Raw data transport; actual sub-command in <code>xmOpCode</code> byte</td>
+</tr>
+<tr>
+<td><code>0x03</code></td>
+<td>CMD_GET_TARGET_INFO</td>
+<td>Probe device info (used as session opener)</td>
+</tr>
+<tr>
+<td><code>0x06</code></td>
+<td>CMD_DISCONNECT_CLASSIC_BT</td>
+<td>Session-init frame (repurposed opCode)</td>
+</tr>
+<tr>
+<td><code>0x07</code></td>
+<td>CMD_GET_SYS_INFO</td>
+<td>Query system info</td>
+</tr>
+<tr>
+<td><code>0x1B</code></td>
+<td>CMD_START_LARGE_FILE_TRANSFER</td>
+<td>Begin file transfer; carries size + CRC16 + filename</td>
+</tr>
+<tr>
+<td><code>0x1C</code></td>
+<td>CMD_STOP_LARGE_FILE_TRANSFER</td>
+<td>End file transfer</td>
+</tr>
+<tr>
+<td><code>0x1D</code></td>
+<td>CMD_LARGE_FILE_TRANSFER_OP</td>
+<td>xmOpCode for each data chunk inside CMD_DATA</td>
+</tr>
+<tr>
+<td><code>0x21</code></td>
+<td>CMD_NOTIFY_PREPARE_ENV</td>
+<td>Prepare environment for file transfer</td>
+</tr>
+<tr>
+<td><code>0x27</code></td>
+<td>CMD_DEV_PARAM_EXTEND</td>
+<td>Negotiate capabilities (CRC16 support, protocol version)</td>
+</tr>
+</tbody>
+</table>
+<h3>Control frames decoded</h3>
+<table>
+<thead>
+<tr>
+<th>t (s)</th>
+<th>flags</th>
+<th>opCode</th>
+<th>opCodeSn</th>
+<th>paramData</th>
+<th>RCSP meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>260.87</td>
+<td>C0</td>
+<td>06</td>
+<td>00</td>
+<td><code>01</code></td>
+<td>Session init (hard-coded <code>FEDCBAC00600020001EF</code>)</td>
+</tr>
+<tr>
+<td>261.56</td>
+<td>C0</td>
+<td>03</td>
+<td>46</td>
+<td><code>ffffffff 00</code></td>
+<td>CMD_GET_TARGET_INFO — device info request</td>
+</tr>
+<tr>
+<td>261.63</td>
+<td>C0</td>
+<td>07</td>
+<td>47</td>
+<td><code>ff000000 04</code></td>
+<td>CMD_GET_SYS_INFO — system info request</td>
+</tr>
+<tr>
+<td>282.06</td>
+<td>C0</td>
+<td>21</td>
+<td>48</td>
+<td><code>00</code></td>
+<td>CMD_NOTIFY_PREPARE_ENV — arm file transfer</td>
+</tr>
+<tr>
+<td>282.44</td>
+<td>C0</td>
+<td>27</td>
+<td>49</td>
+<td><code>00000000 02 01</code></td>
+<td>CMD_DEV_PARAM_EXTEND — negotiate CRC16 + version</td>
+</tr>
+<tr>
+<td>282.50</td>
+<td>C0</td>
+<td>1B</td>
+<td>4A</td>
+<td>see below</td>
+<td>CMD_START_LARGE_FILE_TRANSFER</td>
+</tr>
+<tr>
+<td>284.75</td>
+<td>00</td>
+<td>20</td>
+<td>34</td>
+<td>UTF-16 path</td>
+<td>Post-upload path report (badge→phone, response)</td>
+</tr>
+<tr>
+<td>284.86</td>
+<td>00</td>
+<td>1C</td>
+<td>00</td>
+<td><code>35</code></td>
+<td>CMD_STOP_LARGE_FILE_TRANSFER ack</td>
+</tr>
+</tbody>
+</table>
+<p><strong>CMD_START_LARGE_FILE_TRANSFER (0x1B) body</strong> at t=282.50:</p>
+<pre><code>opCodeSn=4A  |  size(4B big-endian) = 00 00 0A B9 = 2745 bytes
+             |  crc16(2B big-endian) = 32 AF = 0x32AF  (CRC16 of entire file)
+             |  filename = &quot;ddbdbf24.tmp\0&quot;  (null-terminated ASCII, 13 bytes)
+</code></pre>
+<p>The <code>hash</code> field in <code>StartLargeFileTransferParam</code> is actually the temp filename, not a
+cryptographic hash. The CRC16 is computed over the complete JPEG payload.</p>
+<h3>Data frames decoded (opCode=0x01, xmOpCode=0x1D)</h3>
+<p>Each data frame body:</p>
+<pre><code>[opCodeSn]  [xmOpCode=0x1D]  [chunk_index]  [crc16_hi]  [crc16_lo]  [chunk_data...]
+</code></pre>
+<ul>
+<li><code>opCodeSn</code> — shared monotonic session counter (continues from control frames).</li>
+<li><code>xmOpCode = 0x1D</code> — CMD_LARGE_FILE_TRANSFER_OP; identifies this as a file-transfer chunk.</li>
+<li><code>chunk_index</code> — 0-based index within the current JPEG transfer; resets to 0 for each new file.</li>
+<li><code>crc16</code> (2 bytes big-endian) — CRC16 of this chunk's data only (per-chunk integrity).</li>
+<li><code>chunk_data</code> — raw JPEG bytes for this chunk.</li>
+</ul>
+<p>Frame paramLen = <code>01 EF</code> = 495 for full-size chunks; <code>01 2C</code> = 300 for the shorter last chunk.
+Total frame bytes = 8 + paramLen = 503 or 308 respectively.</p>
+<p>Sample decoding (t=282.981, frame 10, first data chunk):</p>
+<pre><code>FE DC BA  80  01  01 EF  4B  1D  00  B7 04  &lt;490 JPEG bytes&gt;  EF
+          ^   ^   ^       ^   ^   ^   ^      ^
+        flags opC pLen  opCSn xmO idx crc16  JPEG data
+</code></pre>
+<ul>
+<li>flags=0x80 (request, no hasResponse), opCode=0x01, paramLen=495</li>
+<li>opCodeSn=0x4B, xmOpCode=0x1D, chunk_index=0, crc16=0xB704</li>
+<li>JPEG continuation bytes (not SOI — this is mid-JPEG from a prior split)</li>
+</ul>
+<p>Sample decoding (t=284.582, frame 15, second JPEG start):</p>
+<pre><code>FE DC BA  80  01  01 EF  50  1D  00  2C 12  FF D8 FF E0 ...  EF
+</code></pre>
+<ul>
+<li>opCodeSn=0x50 (resets chunk_index to 0x00 for new JPEG), crc16=0x2C12</li>
+<li>JPEG SOI <code>FF D8</code> visible — start of second JPEG file</li>
+</ul>
+<p><strong>The payload is JPEG.</strong> The 308-byte chunk at t=283.77 ends with JPEG EOI <code>FF D9</code> before
+the frame trailer <code>EF</code>. The 503-byte chunk at t=284.58 starts with JPEG SOI <code>FF D8 FF E0
+00 10 4A 46 49 46</code> (JFIF APP0 header).</p>
+<h3>Two-JPEG explanation</h3>
+<p>The session sends <strong>two complete JPEG files</strong> sequentially:
+1. <strong>JPEG #1</strong> (chunks 0–4, opCodeSn 0x4B–0x4F): ~2.2 KB, ends with FF D9 in chunk 4.
+2. <strong>JPEG #2</strong> (chunks 0–N, opCodeSn 0x50+): chunk_index resets to 0, starts with FF D8 SOI.</p>
+<p>Both are sent on the same xmOpCode=0x1D channel. The <code>cr3</code> (jl_filebrowse) library
+in the Zrun APK issues two <code>TransferTask</code> runs when saving to the badge's "BAG" folder.
+This likely corresponds to a thumbnail (first JPEG) and the main display image (second JPEG),
+but the exact role assignment requires further testing. A Python client replaying the
+session must send both JPEGs in order.</p>
+<h2>Authentication (control)</h2>
+<p>Before any image upload, an application-layer handshake runs over handles <code>0x0006</code>
+(write) and <code>0x0008</code> (notify). Observed sequence (time-ordered, early connection):</p>
+<table>
+<thead>
+<tr>
+<th>t (s)</th>
+<th>Direction</th>
+<th>Payload</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>260.87</td>
+<td>phone → badge</td>
+<td><code>fedcba c0 0600 02 0001 ef</code></td>
+<td>session init (RCSP frame)</td>
+</tr>
+<tr>
+<td>261.37</td>
+<td>phone → badge</td>
+<td><code>00 &lt;16 random bytes&gt;</code></td>
+<td>phone challenge (no magic envelope, prefixed <code>0x00</code>)</td>
+</tr>
+<tr>
+<td>261.41</td>
+<td>badge → phone</td>
+<td><code>01 &lt;16 random bytes&gt;</code></td>
+<td>badge response/challenge (prefixed <code>0x01</code>)</td>
+</tr>
+<tr>
+<td>261.41</td>
+<td>phone → badge</td>
+<td><code>02 70617373</code></td>
+<td>ASCII <code>"\x02pass"</code> — auth accepted signal</td>
+</tr>
+<tr>
+<td>261.47</td>
+<td>badge → phone</td>
+<td><code>00 &lt;16 random bytes&gt;</code></td>
+<td>badge's own challenge (prefixed <code>0x00</code>)</td>
+</tr>
+<tr>
+<td>261.48</td>
+<td>phone → badge</td>
+<td><code>01 &lt;16 random bytes&gt;</code></td>
+<td>phone response (prefixed <code>0x01</code>)</td>
+</tr>
+<tr>
+<td>261.53</td>
+<td>badge → phone</td>
+<td><code>02 70617373</code></td>
+<td>badge echoes <code>"\x02pass"</code> — auth accepted</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The 16-byte challenge/response is real cryptography.</strong> The Zrun APK (<code>RcspAuth.java</code>)
+calls two JNI native methods in <code>libjl_auth.so</code>:</p>
+<pre><code class="language-java">public native byte[] getRandomAuthData();         // generates 16-byte random challenge
+public native byte[] getEncryptedAuthData(byte[] bArr);  // computes response to badge challenge
+</code></pre>
+<p>The algorithm cannot be read from Java; disassembly of <code>libjl_auth.so</code> is required to
+extract the key and algorithm. The literal ASCII <code>"pass"</code> (<code>\x02 70 61 73 73</code>) is the
+acceptance token sent by both sides <em>after</em> the crypto rounds complete — it is not the
+only check.</p>
+<p><strong>For a Python client:</strong> empirical testing is needed to determine whether the badge
+enforces replay protection (fresh nonce each connection) or whether any fixed 16-byte
+value plus the <code>\x02pass</code> token is accepted. A captured working sequence is:</p>
+<pre><code>phone→badge: 00 70b759 92e05ea7 8fec533b a12979b5 90   (0x00 + 16 bytes)
+phone→badge: 02 70617373                                (0x02 + &quot;pass&quot;)
+phone→badge: 01 dd08e8 78b7cfdc 5bef67cb fe80c993 b3   (0x01 + 16 bytes)
+</code></pre>
+<p><strong>These 6 packets do NOT use the <code>fedcba…ef</code> envelope.</strong> They are raw writes with the
+single-byte prefix (<code>00</code>, <code>01</code>, <code>02</code>). Only the RCSP control and data frames after the
+handshake use the envelope.</p>
+<h2>Notification behaviour</h2>
+<p>The badge sends frequent notifications on <code>0x0008</code> during and between operations. Pattern:
+- Each client control frame (flags=0xC0) elicits a matching badge notification (flags=0x00,
+  response direction). Example at t=282.97: client sends <code>fedcba c0 1b 00 14 4a …</code>, badge
+  replies <code>fedcba 00 1b 00 04 00 4a 01 ea ef</code> (flags=0x00, opCode=0x1B, status=0x00).
+- During image data bursts (flags=0x80), the badge emits flags=0x80 notifications (data
+  acks). Example: <code>fedcba 80 1d 00 08 32 00 0f 50 00 00 01 ea ef</code> immediately after the
+  first data chunk.
+- A post-upload notification at t=284.84 contains flags=0xC0, opCode=0x20 with paramData
+  <code>01 34</code> — likely a "transfer complete" signal.</p>
+<h2>Observed write summary (for task 7 replay)</h2>
+<ul>
+<li>Total ATT operations on handle <code>0x000f</code> connection: 140 packets</li>
+<li>Client writes to handle <code>0x0006</code> (target for image upload): <strong>17 RCSP frames + 6 data frames + 5 auth packets = 28 writes</strong></li>
+<li>17 are control frames (flags=0xC0, opCode varies: 0x06/0x03/0x07/0x21/0x27/0x1B/0x1C)</li>
+<li>6 are image-data frames (flags=0x80, opCode=0x01 CMD_DATA, xmOpCode=0x1D)</li>
+<li>5 are the pre-handshake auth packets (no envelope: raw <code>00</code>/<code>01</code>/<code>02</code> prefix)</li>
+<li>Notifications received on handle <code>0x0008</code>: 12 plain notifications + 18 indications</li>
+<li>Writes to handle <code>0x000c</code> (JieLi RCSP 128-bit service): 11 (not related to image upload)</li>
+</ul>
+<h2>Questions resolved by jadx analysis</h2>
+<p>The following questions from the initial analysis are now answered.</p>
+<p><strong>Q1 — Is the 16-byte challenge/response real cryptography?</strong>
+Yes. <code>RcspAuth.getRandomAuthData()</code> and <code>RcspAuth.getEncryptedAuthData()</code> are JNI native
+methods in <code>libjl_auth.so</code>. The algorithm is genuinely cryptographic. The literal <code>"pass"</code>
+token is sent <em>after</em> both challenge-response rounds succeed, not instead of them. For a
+Python client, try replaying the captured fixed sequences first; if the badge rejects them,
+disassembly of <code>libjl_auth.so</code> is the next step.</p>
+<p><strong>Q2 — What do each control sub-opcode do?</strong>
+The "sub-opcode" is the <code>opCode</code> field (byte after flags), not a sub-field. Decoded:
+- <code>0x06</code> CMD_DISCONNECT_CLASSIC_BLUETOOTH — session-init frame (hard-coded constant in RcspAuth)
+- <code>0x03</code> CMD_GET_TARGET_INFO — device info query (probe)
+- <code>0x07</code> CMD_GET_SYS_INFO — system info query
+- <code>0x21</code> CMD_NOTIFY_PREPARE_ENV — arm the file transfer subsystem (1-byte param <code>00</code>)
+- <code>0x27</code> CMD_DEV_PARAM_EXTEND — negotiate CRC16 support and protocol version
+- <code>0x1B</code> CMD_START_LARGE_FILE_TRANSFER — announce file: size(4B) + CRC16(2B) + filename(N bytes null-terminated)
+- <code>0x1C</code> CMD_STOP_LARGE_FILE_TRANSFER — close the file transfer
+- <code>0x1D</code> appears as <code>xmOpCode</code> in every data frame, identifying them as large-file chunks</p>
+<p>The <code>0x1B</code> paramData carries the <strong>CRC16</strong> of the entire file and the <strong>byte size</strong> of the
+file, not a SHA hash. See "Control frames decoded" table above.</p>
+<p><strong>Q3 — Why are there two JPEG blocks?</strong>
+The badge's <code>cr3</code> (jl_filebrowse) library sends two separate JPEG files to the badge's
+"BAG" directory. Chunk index resets to 0 for the second file. Both use xmOpCode=0x1D.
+JPEG #1 (chunks 0–4, seq 0x4B–0x4F) is ~2.2 KB and ends with FF D9.
+JPEG #2 (chunk 0+, seq 0x50+) starts with JPEG SOI FF D8 and is the main display image
+(or a thumbnail/preview variant). A Python client must send both files.</p>
+<p><strong>Q4 — What is the sequence-counter reset rule?</strong>
+The <code>opCodeSn</code> byte is a shared monotonic counter across the entire session (both control
+and data frames). It does NOT reset between JPEG transfers. It starts at <code>0x00</code> for the
+hard-coded session-init frame, then begins at some value (observed: <code>0x46</code> = 70) for
+regular commands. It increments by 1 per frame and wraps <code>0xFF → 0x00</code>.
+The chunk_index (separate field within data frame body) resets to 0 for each new file.</p>
+<p><strong>Q5 — Is there a CRC/hash?</strong>
+Yes, two CRCs:
+1. <strong>Per-file CRC16</strong> in CMD_START_LARGE_FILE_TRANSFER (0x1B) body: 2-byte big-endian
+   CRC16 of the complete JPEG file, computed by <code>CryptoUtil.CRC16(file_bytes, (short)0)</code>.
+   Observed value: <code>32 AF</code> = 0x32AF for the 2745-byte JPEG.
+2. <strong>Per-chunk CRC16</strong> in each data frame: 2 bytes big-endian after chunk_index, computed
+   by <code>CryptoUtil.CRC16(chunk_bytes, (short)0)</code>. Present when both <code>appHasCrc16</code> and
+   <code>firmwareHasCrc16</code> flags are true (both true in the observed session).
+There is no SHA-1 or CRC32. No CRC in the frame trailer.</p>
+<h2>Phase 1 exit status — protocol confirmed working</h2>
+<p>As of 2026-04-20, <code>spike/e87_client.py</code> uploads arbitrary JPEG images to the badge and
+renders them as new gallery entries. Two images verified on hardware:</p>
+<ol>
+<li><code>docs/captures/01-solid-red-360.png</code> — 1.1 KB as PNG, encoded to 1.1 KB JPEG, 3 chunks</li>
+<li>Arbitrary 360×360 blue-and-yellow-circle — 7.7 KB JPEG, 16 chunks, 3 windowed bursts</li>
+</ol>
+<p>So the remainder of this document should be read as a conceptual description; for concrete
+wire behaviour the authoritative references are the working client (<code>spike/e87_client.py</code>),
+the MIT-licensed upstream (<code>hybridherbst/web-bluetooth-e87</code>, <code>web/src/lib/e87-protocol.ts</code>),
+and the validated auth cipher port (<code>spike/jieli_auth.py</code> + test vector in
+<code>tests/test_jieli_auth.py</code>).</p>
+<h2>Client implementation notes</h2>
+<h3>Authentication (verified)</h3>
+<p>The 16-byte values in the <code>0x00</code>/<code>0x01</code> handshake packets are <strong>real AES-like block-cipher
+output</strong> from a bespoke JieLi algorithm, not AES. It is implemented in <code>libjl_auth.so</code>
+(ARM64 binary in the Zrun split APK) with these parameters:</p>
+<ul>
+<li>Three 256-byte lookup tables (<code>KS_TABLE</code>, <code>SBOX</code>, <code>ISBOX</code>) at <code>.so</code> offsets
+  <code>0x1B4C</code>, <code>0x1C4C</code>, <code>0x1D4C</code>.</li>
+<li>Hardcoded static key <code>06 77 5F 87 91 8D D4 23 00 5D F1 D8 CF 0C 14 2B</code>.</li>
+<li>Hardcoded 6-byte magic <code>11 22 33 33 22 11</code> used as the repeated-pattern second key.</li>
+<li>16 rounds with rotate-3-left, SBOX/ISBOX swap, Fibonacci-butterfly mix, <code>0x9999</code> mask.</li>
+</ul>
+<p>Test vector (from the real Zrun capture in <code>docs/captures/01-solid-red-360.log</code>):
+- challenge <code>70 B7 59 92 E0 5E A7 8F EC 53 3B A1 29 79 B5 90</code>
+- response <code>FF E9 E6 C8 0C E1 F4 0F 5C CE AE 20 83 1C 58 79</code></p>
+<p>Our Python port (<code>spike/jieli_auth.py</code>) produces this response byte-exactly for the given
+challenge. Same key across our device and the upstream maintainer's device, so likely
+universal for this SDK revision. If a future vendor customizes the key, extract it from
+the target device's own <code>libjl_auth.so</code> at the same offset.</p>
+<h3>Advertising-name is "E87"</h3>
+<p>The badge's GAP advertising name is literally <code>E87</code>, visible in the <strong>scan response</strong>.
+Android's system Bluetooth settings hides this because Zrun scans and connects directly
+using the Filter Accept List without populating the user-facing list — but BlueZ / any
+active scanner sees it. Home Assistant's <code>bluetooth:</code> manifest matcher can safely use
+<code>{ "local_name": "E87" }</code> for auto-discovery. Fallback: match on service UUID
+<code>0000ae00-0000-1000-8000-00805f9b34fb</code>.</p>
+<h3>MTU</h3>
+<p>BlueZ on Linux does not auto-negotiate a higher MTU for <code>write-without-response</code> on
+GATT characteristics; <code>bleak</code> reports <code>mtu_size=23</code> even when larger would work. In
+practice the badge accepts writes up to <strong>~500 bytes</strong> (close to MTU=517 as negotiated by
+Zrun on Android) — BlueZ sends these as multi-packet L2CAP fragments. No explicit MTU
+negotiation is required from our client code for the upload to succeed.</p>
+<h3>Image encoding</h3>
+<ul>
+<li>Resize the input to <strong>368×368</strong> (not 360×360 as suggested by the Amazon product
+  description, and not 384×384 as upstream's README title claims). <code>spike/e87_client.py</code>
+  uses Pillow's <code>LANCZOS</code> resample.</li>
+<li>Encode as <strong>JPEG</strong> with quality ~88. Typical output: 1–15 KB for images up to full frame.
+  The whole JPEG file is what the badge stores and displays. No further container or
+  wrapper.</li>
+<li>Orientation: 360° round panel; top of JPEG maps to top of badge. No rotation needed.</li>
+</ul>
+<h3>Upload flow (high level)</h3>
+<p>Upstream's full state machine is the authoritative reference. The rough 9-phase sequence
+that <code>spike/e87_client.py</code> follows:</p>
+<ol>
+<li><strong>Connect, subscribe to all four notify characteristics</strong> (<code>AE02</code>, <code>FD01</code>, <code>FD03</code>,
+   <code>FD05</code>). FD04's CCCD may fail with "not supported" on some platforms; ignored.</li>
+<li><strong>Authentication</strong> (mutual handshake as described above).</li>
+<li><strong>Phase 1:</strong> send <code>0x06</code> (CMD_DISCONNECT_CLASSIC_BT) to reset the auth flag server-side.</li>
+<li><strong>Phase 2:</strong> three FD02 control writes (time sync / session hello / keepalive).</li>
+<li><strong>Phase 3:</strong> <code>0x03</code> (CMD_GET_TARGET_INFO) — device info probe. Response identifies the
+   JieLi SDK build (<code>jl_sdk_ac697_publish</code> in our case).</li>
+<li><strong>Phase 4:</strong> <code>0x07</code> (CMD_GET_SYS_INFO) — system info probe.</li>
+<li><strong>Phase 5:</strong> FD02 bootstrap — wait for ready signal (0x9E…C7 pattern).</li>
+<li><strong>Phase 6:</strong> <code>0x21</code> (CMD_NOTIFY_PREPARE_ENV) — arm the file-transfer subsystem.</li>
+<li><strong>Phase 7:</strong> <code>0x27</code> (CMD_DEV_PARAM_EXTEND) — negotiate CRC16 and protocol flags.</li>
+<li><strong>Phase 8:</strong> <code>0x1B</code> (CMD_START_LARGE_FILE_TRANSFER) — announce file with size,
+    CRC-16/XMODEM of the file, and a generated temp filename like <code>ac263d.tmp</code>. The badge
+    responds with a chunk-size hint (observed: <strong>490 bytes</strong>, not MTU-derived).</li>
+<li><strong>Phase 9:</strong> data transfer with window-based flow control:<ul>
+<li>Each data frame is <code>FE DC BA 80 01 LEN seq 1D slot CRC16 &lt;chunk_bytes&gt; EF</code>.</li>
+<li>Chunks batched into windows (badge advertises window size in its ack; ~3920 bytes
+  = 8 chunks of 490).</li>
+<li>Badge emits <code>0x1D</code> notifications on AE02 with the next-offset pointer and window
+  size; client sends that window, then waits for the next ack.</li>
+<li>Final chunk advertises the trailing <code>FF D9</code> JPEG End-of-Image marker.</li>
+</ul>
+</li>
+<li><strong>Phase 10 — Completion handshake:</strong><ul>
+<li>Badge notifies <code>0xC0 0x20</code> (FILE_COMPLETE) with a device sequence number.</li>
+<li>Client responds with <code>0x00 0x20</code> containing a UTF-16LE path string
+  (<code>\Udd5c\U55...jpg\0</code>) that names the final location the badge stored the file.</li>
+<li>Badge notifies <code>0xC0 0x1C</code> (SESSION_CLOSE).</li>
+<li>Client responds <code>0x00 0x1C</code>, disconnects.</li>
+</ul>
+</li>
+</ol>
+<h3>CRC-16/XMODEM</h3>
+<p>Standard CRC-16/XMODEM (polynomial <code>0x1021</code>, init <code>0x0000</code>, no reflection, no final XOR).
+Verified against the test vector <code>CRC16("123456789") = 0x31C3</code>. Used in two places:</p>
+<ul>
+<li>Whole-file CRC in the <code>0x1B</code> body (2 bytes, big-endian).</li>
+<li>Per-chunk CRC in each data frame after the chunk_index (2 bytes, big-endian).</li>
+</ul>
+<h3>Filenames</h3>
+<p>The temp filename sent in <code>0x1B</code> is generated by the client as <code>&lt;6-hex-chars&gt;.tmp</code> (hex
+of a random 3-byte prefix). The badge responds in its <code>0x20</code> ack with the final filename
+it stored the file under, which is arbitrary-looking (e.g.
+<code>\5c\55 32 30 32 36 30 34 32 30 32 33 33 39 32 37 2e 6a 70 67 00</code> in UTF-16LE —
+the <code>5c55</code> prefix is not ASCII, it is the two bytes of the Chinese char <code>囜</code> (U+555C);
+the rest is the date-time <code>20260420233927.jpg</code>). The client echoes this back verbatim
+in its own <code>0x20</code> response.</p>
+<h2>JieLi RCSP side-channel (<code>FD01</code>/<code>FD02</code>/<code>FD03</code>/<code>FD05</code>)</h2>
+<p>The service <code>c2e6fd00-e966-1000-8000-bef9c223df6a</code> is standard JieLi RCSP. For image
+upload we send three short FD02 commands in Phase 2 (time-sync, session-hello, keep-alive)
+and one in Phase 5 (bootstrap). All four are verbatim hex blobs from upstream; their
+semantics are unused by our client.</p>
+<p>Other RCSP commands (battery level via AC697 system events, firmware version, file
+listing) are documented in upstream's README and JieLi's own <code>jl_rcsp</code> SDK; out of
+scope for v1 of the image uploader but useful for phase 3 (Home Assistant sensor entities).</p>
+<h2>Out of scope (observed but not used in v1)</h2>
+<ul>
+<li>Most JieLi RCSP traffic on the 128-bit service: battery level sensing (via AC697 system
+  events), firmware version queries, OTA upgrade. Phase 2 (Home Assistant integration)
+  may expose these as sensor entities.</li>
+<li>AVI / multi-frame / video upload — the badge supports animated uploads; our client
+  sends a single JPEG at a time. The upstream <code>e87-protocol.ts</code> has the code if/when
+  we want this.</li>
+<li>Pattern / QR / sequence modes from upstream's UI.</li>
+<li>JPEG quality tuning — we use a fixed <code>quality=88</code>. Larger quality produces bigger files;
+  the badge's practical max file size is unknown.</li>
+<li>Retry policies for mid-transfer disconnects — current client errors out; a real library
+  would reconnect and resume (or retry the whole upload).</li>
+</ul>
+<hr />
+<h2>Gallery / instant asset switching (experimental, reverse-engineered)</h2>
+<p>Recovered by decompiling the Zrun APK (<code>com.zijun.zrun</code> 2.3.0) with jadx and
+tracing the bundled JieLi watch SDK (<code>com.jieli.jl_rcsp</code>) to its BLE write
+layer. The badge's existing upload opcodes already match the JieLi RCSP command
+registry (e.g. e87 <code>0x1B</code>/<code>0x1C</code> begin/end-transfer = RCSP large-file-transfer
+27/28), so these commands ride the same FE frame on AE01.</p>
+<h3>Storage model</h3>
+<p>Every upload is committed to its <strong>own</strong> persistent file. The client's reply to
+the device's <code>FILE_COMPLETE</code> (cmd <code>0x20</code>) carries the gallery filename
+<code>啜&lt;YYYYMMDDHHMMSS&gt;.&lt;ext&gt;</code> in UTF-16LE, which the firmware stores verbatim
+(<code>_make_device_path</code> in <code>protocol.py</code>). Files accumulate; they do not overwrite
+a single slot. <code>UploadSession.run()</code> now returns this path.</p>
+<h3>Switch / query the active file — RCSP External-Flash I/O control (opcode 26 / <code>0x1A</code>)</h3>
+<p>Frame: <code>FE DC BA | flag | 0x1A | len | [opCodeSn][op][flag][payload] | EF</code></p>
+<p>The body after <code>opCodeSn</code> is JieLi's <code>ExternalFlashIOCtrlParam.toData()</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Bytes</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>op</td>
+<td>1</td>
+<td><code>0x03</code> = <code>OP_DIAL_ACTION</code></td>
+</tr>
+<tr>
+<td>flag</td>
+<td>1</td>
+<td><code>0x00</code> get / <code>0x01</code> set / <code>0x02</code> notify</td>
+</tr>
+<tr>
+<td>payload</td>
+<td>N</td>
+<td>file path (UTF-8) for set; empty for get</td>
+</tr>
+</tbody>
+</table>
+<p>So <strong>switch</strong> = <code>... 1A &lt;len&gt; &lt;sn&gt; 03 01 &lt;utf8 path&gt; EF</code> and <strong>query</strong> =
+<code>... 1A &lt;len&gt; &lt;sn&gt; 03 00 EF</code>.</p>
+<p>Decompiled provenance (paths under the decompiled <code>sources/</code> root):
+- <code>com/jieli/jl_rcsp/model/parameter/ExternalFlashIOCtrlParam.java</code> — <code>toData() = [op][flag][payload]</code>
+- <code>com/jieli/jl_rcsp/model/parameter/flash/action/DialActionParam.java</code> — <code>super(3, flag, str.getBytes())</code>; flags <code>GET=0/SET=1/NOTIFY=2</code>
+- <code>com/jieli/jl_rcsp/model/parameter/flash/action/SetUsingDialParam.java</code> — <code>super(1, path)</code>
+- <code>com/jieli/jl_rcsp/model/command/external_flash/ExternalFlashIOCtrlCmd.java</code> — <code>CommandBase(26, …)</code>, <code>buildSwitchUsingDialCmd(path)</code>
+- FE-frame ↔ RCSP packet equivalence: <code>com/jieli/jl_bt_ota/tool/data_handler/RcspParser.java:67</code> (<code>flag | opcode | paramLen(2BE) | [status?][opCodeSn][param]</code>)</p>
+<h3>File listing — RCSP file-browse (opcode 12 / <code>0x0C</code>)</h3>
+<p><code>PathData.toData()</code> = <code>type(1) readNum(1) startIndex(2BE) devHandler(4BE)
+clusterListLen(2BE) clusters…</code>. Root listing = <code>00 0A 0001 00000000 0000</code>.
+The browse <em>response</em> uses JieLi's own <code>FileStruct</code> encoding which this client
+only partially decodes; prefer the path returned by each upload.
+Provenance: <code>com/jieli/jl_filebrowse/bean/PathData.java</code>,
+<code>com/jieli/jl_filebrowse/FileBrowseManager.java</code>.</p>
+<h3>Verification status</h3>
+<p>The <strong>protocol</strong> support is proven in the SDK code; whether a given <strong>E87
+firmware build</strong> implements opcode <code>0x1A</code>/<code>0x0C</code> is not — the stock app drives
+the badge via a separate re-upload path and never sends these. Use
+<code>e87 probe</code> / <code>E87Client.probe_switching()</code> to test a real unit. See
+<a href="instant-switching.html"><code>instant-switching.md</code></a>.</p>
+</div></div></main>
+<footer><div class="wrap">
+  <span>e87_badge · reverse-engineered client for the JieLi E87 badge · MIT</span>
+  <span><a href="https://github.com/malpern/e87_badge">GitHub</a> &nbsp;·&nbsp; <a href="getting-started.html">Docs</a> &nbsp;·&nbsp; <a href="protocol.html">Protocol</a></span>
+</div></footer>
+<script src="assets/app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+</body></html>
