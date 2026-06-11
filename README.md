@@ -1,5 +1,7 @@
 # e87_badge
 
+📖 **Documentation site: [malpern.github.io/e87_badge](https://malpern.github.io/e87_badge/)** — getting started, the [instant-switching guide](https://malpern.github.io/e87_badge/instant-switching), and the full [protocol reference](https://malpern.github.io/e87_badge/protocol).
+
 Open-source Python client + Home Assistant integration for the **E-Badge E87 / L8** round-screen Bluetooth pin (the one that normally pairs with the Zrun app).
 
 - 🖼️ Static images (JPEG/PNG upload)
@@ -7,6 +9,7 @@ Open-source Python client + Home Assistant integration for the **E-Badge E87 / L
 - 🎞️ Multi-image slideshows (MJPG AVI)
 - 🖼️ Animated GIFs
 - 🧧 Danmaku — scrolling text with custom colours
+- ⚡ **Instant asset switching** — the switch-by-reference command exists in the protocol, but the firmware we tested (E87 `V11.1.0.3`) rejects it; `e87 probe` checks your unit. See [`docs/instant-switching.md`](docs/instant-switching.md).
 
 Built on top of:
 
@@ -33,9 +36,38 @@ e87 text "Hello" --size 96 --colour white    # rendered text
 e87 slideshow a.png b.png c.png --ms 600     # multi-image slideshow
 e87 gif pulse.gif                            # animated GIF
 e87 danmaku "Welcome!" --fg red --bg yellow  # scrolling text
+
+# instant switching (experimental — run `e87 probe` first to confirm support)
+e87 probe                                    # does this badge support switching?
+e87 show '啜20260610153000.jpg'               # display an already-uploaded file
+e87 current                                  # what's on screen right now?
+e87 ls                                        # list files stored on the badge
 ```
 
 Pass `--address AA:BB:CC:DD:EE:FF` to target a specific badge (otherwise discovery picks the first one).
+
+---
+
+## ⚡ Instant asset switching — found, but firmware-gated
+
+The device's own SDK has a "show a stored file by reference" command, which
+*would* let you preload several assets and flip between them with one tiny
+sub-second command instead of re-uploading:
+
+```python
+async with E87Client(addr) as badge:
+    idle   = await badge.send_gif("idle.gif")     # returns the device path
+    active = await badge.send_gif("active.gif")
+    await badge.show_file(active)                  # one command, no re-upload
+```
+
+**Reality check (measured):** on the firmware we tested — **E87 `V11.1.0.3`** —
+the badge **rejects** the switch command (RCSP status `0x02`); the dial subsystem
+isn't implemented, so the display always shows the last uploaded file.
+`show_file()` raises `E87ProtocolError` and you fall back to re-upload (~4 s).
+`await badge.probe_switching()` (or `e87 probe`) checks any given unit honestly —
+other/newer firmware may implement it. Full write-up:
+[`docs/instant-switching.md`](docs/instant-switching.md).
 
 Library API:
 

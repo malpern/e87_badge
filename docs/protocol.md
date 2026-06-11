@@ -441,3 +441,78 @@ scope for v1 of the image uploader but useful for phase 3 (Home Assistant sensor
   the badge's practical max file size is unknown.
 - Retry policies for mid-transfer disconnects — current client errors out; a real library
   would reconnect and resume (or retry the whole upload).
+
+---
+
+## Gallery / instant asset switching (experimental, reverse-engineered)
+
+Recovered by decompiling the Zrun APK (`com.zijun.zrun` 2.3.0) with jadx and
+tracing the bundled JieLi watch SDK (`com.jieli.jl_rcsp`) to its BLE write
+layer. The badge's existing upload opcodes already match the JieLi RCSP command
+registry (e.g. e87 `0x1B`/`0x1C` begin/end-transfer = RCSP large-file-transfer
+27/28), so these commands ride the same FE frame on AE01.
+
+### Storage model
+
+Every upload is committed to its **own** persistent file. The client's reply to
+the device's `FILE_COMPLETE` (cmd `0x20`) carries the gallery filename
+`啜<YYYYMMDDHHMMSS>.<ext>` in UTF-16LE, which the firmware stores verbatim
+(`_make_device_path` in `protocol.py`). Files accumulate; they do not overwrite
+a single slot. `UploadSession.run()` now returns this path.
+
+### Switch / query the active file — RCSP External-Flash I/O control (opcode 26 / `0x1A`)
+
+Frame: `FE DC BA | flag | 0x1A | len | [opCodeSn][op][flag][payload] | EF`
+
+The body after `opCodeSn` is JieLi's `ExternalFlashIOCtrlParam.toData()`:
+
+| Field | Bytes | Value |
+|-------|-------|-------|
+| op    | 1 | `0x03` = `OP_DIAL_ACTION` |
+| flag  | 1 | `0x00` get / `0x01` set / `0x02` notify |
+| payload | N | file path (UTF-8) for set; empty for get |
+
+So **switch** = `... 1A <len> <sn> 03 01 <utf8 path> EF` and **query** =
+`... 1A <len> <sn> 03 00 EF`.
+
+Decompiled provenance (paths under the decompiled `sources/` root):
+- `com/jieli/jl_rcsp/model/parameter/ExternalFlashIOCtrlParam.java` — `toData() = [op][flag][payload]`
+- `com/jieli/jl_rcsp/model/parameter/flash/action/DialActionParam.java` — `super(3, flag, str.getBytes())`; flags `GET=0/SET=1/NOTIFY=2`
+- `com/jieli/jl_rcsp/model/parameter/flash/action/SetUsingDialParam.java` — `super(1, path)`
+- `com/jieli/jl_rcsp/model/command/external_flash/ExternalFlashIOCtrlCmd.java` — `CommandBase(26, …)`, `buildSwitchUsingDialCmd(path)`
+- FE-frame ↔ RCSP packet equivalence: `com/jieli/jl_bt_ota/tool/data_handler/RcspParser.java:67` (`flag | opcode | paramLen(2BE) | [status?][opCodeSn][param]`)
+
+### File listing — RCSP file-browse (opcode 12 / `0x0C`)
+
+`PathData.toData()` = `type(1) readNum(1) startIndex(2BE) devHandler(4BE)
+clusterListLen(2BE) clusters…`. Root listing = `00 0A 0001 00000000 0000`.
+The browse *response* uses JieLi's own `FileStruct` encoding which this client
+only partially decodes; prefer the path returned by each upload.
+Provenance: `com/jieli/jl_filebrowse/bean/PathData.java`,
+`com/jieli/jl_filebrowse/FileBrowseManager.java`.
+
+### Verification status — measured on E87 V11.1.0.3
+
+The opcodes exist in the device's SDK, but a hardware test settled what the
+**firmware** actually honors. On a badge running **V11.1.0.3**:
+
+| Command | Response status | Result |
+|---|---|---|
+| `EXTERNAL_FLASH_IOCTRL` dial-action `GET_USING_DIAL` (0x1A, op3 flag0) | `0x02` = `STATUS_UNKNOWN_CMD` | rejected |
+| `EXTERNAL_FLASH_IOCTRL` dial-action `SET_USING_DIAL` (0x1A, op3 flag1) | `0x02` = `STATUS_UNKNOWN_CMD` | rejected |
+| `FILE_BROWSE` (0x0C) | `0x00` = `STATUS_SUCCESS` | accepted |
+| qix `SET_THEME` (0x19) / `SET_PUSH_DIAL` (0x1C), FD02 + FD03 | *(no response)* | no effect |
+
+`0x02` is `STATUS_UNKNOWN_CMD` in JieLi's own `StateCode` — the firmware
+explicitly reports the dial-action as an unknown command (returned even for the
+parameter-less `GET_USING_DIAL`, so it isn't a path/argument problem). The
+legacy "qix" command stack was also tested over both `C2E6FD02` and the
+`C2E6FD03` control channel: the dial/theme/picture commands drew **no response**
+and changed nothing on screen.
+
+So **display-by-reference (instant switching) is NOT supported on V11.1.0.3** —
+the watch-dial subsystem isn't implemented in this display-badge firmware; the
+badge shows the most-recently-uploaded file. File browse *is* accepted, so the
+filesystem is enumerable. Other firmware may differ — use `e87 probe` /
+`E87Client.probe_switching()` (it checks the status byte) on any given unit. See
+[`instant-switching.md`](instant-switching.md).

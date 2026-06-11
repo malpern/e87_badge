@@ -86,6 +86,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_dm.add_argument("--fps", type=int, default=20)
 
+    # ── gallery / instant switching (experimental) ──────────────────────────
+
+    # show — switch the display to an already-stored file (no re-upload)
+    p_show = sub.add_parser(
+        "show",
+        help="EXPERIMENTAL: instantly display an already-uploaded file by path.",
+    )
+    p_show.add_argument("path", help="Device-side path (as returned by an upload).")
+    p_show.add_argument("--address", help="Badge MAC; if omitted, auto-discovered.")
+
+    # current — print the path of the file currently on screen
+    p_cur = sub.add_parser(
+        "current", help="EXPERIMENTAL: print the path of the file on screen now.",
+    )
+    p_cur.add_argument("--address", help="Badge MAC; if omitted, auto-discovered.")
+
+    # ls — list files stored on the badge
+    p_ls = sub.add_parser("ls", help="EXPERIMENTAL: list files stored on the badge.")
+    p_ls.add_argument("--address", help="Badge MAC; if omitted, auto-discovered.")
+
+    # probe — report which instant-switch capabilities this firmware supports
+    p_probe = sub.add_parser(
+        "probe",
+        help="Probe whether this badge supports instant asset switching.",
+    )
+    p_probe.add_argument("--address", help="Badge MAC; if omitted, auto-discovered.")
+
     return parser
 
 
@@ -122,7 +149,10 @@ async def _cmd_info(args: argparse.Namespace) -> int:
 async def _cmd_image(args: argparse.Namespace) -> int:
     address = await _resolve_address(args.address)
     async with E87Client(address) as client:
-        await client.send_image(args.path)
+        path = await client.send_image(args.path)
+    if path:
+        print(f"Stored on device as: {path}")
+        print(f"Redisplay later with:  e87 show '{path}' --address {address}")
     return 0
 
 
@@ -149,7 +179,53 @@ async def _cmd_slideshow(args: argparse.Namespace) -> int:
 async def _cmd_gif(args: argparse.Namespace) -> int:
     address = await _resolve_address(args.address)
     async with E87Client(address) as client:
-        await client.send_gif(args.path, max_fps=args.max_fps)
+        path = await client.send_gif(args.path, max_fps=args.max_fps)
+    if path:
+        print(f"Stored on device as: {path}")
+        print(f"Redisplay later with:  e87 show '{path}' --address {address}")
+    return 0
+
+
+async def _cmd_show(args: argparse.Namespace) -> int:
+    address = await _resolve_address(args.address)
+    async with E87Client(address) as client:
+        await client.show_file(args.path)
+    print(f"Switched display to {args.path}")
+    return 0
+
+
+async def _cmd_current(args: argparse.Namespace) -> int:
+    address = await _resolve_address(args.address)
+    async with E87Client(address) as client:
+        path = await client.current_file()
+    print(path or "(unknown)")
+    return 0
+
+
+async def _cmd_ls(args: argparse.Namespace) -> int:
+    address = await _resolve_address(args.address)
+    async with E87Client(address) as client:
+        files = await client.list_files()
+    for name in files:
+        print(name)
+    if not files:
+        print("(no files reported)", file=sys.stderr)
+    return 0
+
+
+async def _cmd_probe(args: argparse.Namespace) -> int:
+    import json
+
+    address = await _resolve_address(args.address)
+    async with E87Client(address) as client:
+        report = await client.probe_switching()
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    supported = bool((report.get("set_using_dial") or {}).get("supported"))
+    print(
+        "\nInstant switching: "
+        + ("SUPPORTED on this badge ✅" if supported else "NOT confirmed on this badge ❌"),
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -176,6 +252,10 @@ _DISPATCH = {
     "slideshow": _cmd_slideshow,
     "gif": _cmd_gif,
     "danmaku": _cmd_danmaku,
+    "show": _cmd_show,
+    "current": _cmd_current,
+    "ls": _cmd_ls,
+    "probe": _cmd_probe,
 }
 
 

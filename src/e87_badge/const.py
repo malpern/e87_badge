@@ -84,3 +84,39 @@ EXTENSION_STATIC = "jpg"
 
 EXTENSION_ANIMATED = "avi"
 """Filename extension for any MJPG-AVI: slideshow, GIF, danmaku, video."""
+
+
+# ── Gallery / dial-switch (RCSP External-Flash I/O control) ─────────────────
+#
+# EXPERIMENTAL. Reverse-engineered from the Zrun APK's bundled JieLi watch SDK
+# (`com.jieli.jl_rcsp`), not yet confirmed against E87 firmware. The badge
+# stores every uploaded asset as its own persistent file (see the cmd 0x20
+# path response in protocol.py), so in principle a tiny "switch active file"
+# command can flip the display between preloaded assets with no re-upload.
+#
+# The command rides the same FE frame as everything else:
+#     flag=FLAG_COMMAND  cmd=CMD_EXTERNAL_FLASH_IOCTRL
+#     body = [opCodeSn, OP_DIAL_ACTION, <action flag>, *payload]
+# where the body after the sequence byte is exactly JieLi's
+# ExternalFlashIOCtrlParam.toData() = [op][flag][payload].
+
+CMD_EXTERNAL_FLASH_IOCTRL = 0x1A
+"""RCSP opcode 26: external-flash I/O control (file create/read/delete + dial actions)."""
+
+OP_DIAL_ACTION = 0x03
+"""ExternalFlashIOCtrl sub-op 3: act on the currently-displayed dial/file."""
+
+FLAG_GET_USING_DIAL = 0x00
+"""Dial action: read the path of the file currently on screen."""
+
+FLAG_SET_USING_DIAL = 0x01
+"""Dial action: switch the display to an already-stored file (payload = path)."""
+
+FLAG_NOTIFY_USING_DIAL = 0x02
+"""Dial action: device-initiated notification that the active file changed."""
+
+CMD_FILE_BROWSE_START = 0x0C
+"""RCSP opcode 12: start a file-browse (directory listing) session. Experimental."""
+
+CMD_FILE_BROWSE_STOP = 0x0D
+"""RCSP opcode 13: stop the file-browse session. Experimental."""
